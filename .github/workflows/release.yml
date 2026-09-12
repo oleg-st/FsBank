@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      PUBLISH_DIR: ${{ github.workspace }}/artifacts/publish
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish standalone Windows x64 application
+        run: >-
+          dotnet publish src/FsBank.Scanner/FsBank.Scanner.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --output "$env:PUBLISH_DIR"
+          -p:PublishSingleFile=false
+          -p:PublishTrimmed=false
+          -p:DebugType=None
+          -p:DebugSymbols=false
+
+      - name: Verify and package all publish files
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('FsBank.Scanner.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:PUBLISH_DIR $file))) {
+              throw "Missing application/runtime file: $file"
+            }
+          }
+          $assets = Join-Path $env:GITHUB_WORKSPACE 'src/FsBank.Scanner/Assets'
+          Get-ChildItem -LiteralPath $assets -File -Recurse | ForEach-Object {
+            $relative = [IO.Path]::GetRelativePath($assets, $_.FullName)
+            $published = Join-Path $env:PUBLISH_DIR "Assets/$relative"
+            if (-not (Test-Path -LiteralPath $published)) {
+              throw "Missing asset: $relative"
+            }
+            if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $published).Hash) {
+              throw "Asset content mismatch: $relative"
+            }
+          }
+          Copy-Item -LiteralPath LICENSE, README.md -Destination $env:PUBLISH_DIR
+          $archive = Join-Path $env:GITHUB_WORKSPACE 'artifacts/FsBank-win-x64.zip'
+          Compress-Archive -Path "$env:PUBLISH_DIR/*" -DestinationPath $archive
+
+      - name: Create GitHub Release and upload ZIP
+        run: |
+          $archive = Join-Path $env:GITHUB_WORKSPACE 'artifacts/FsBank-win-x64.zip'
+          gh release view "$env:GITHUB_REF_NAME" --json id 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$env:GITHUB_REF_NAME" "$archive" --clobber
+          } else {
+            gh release create "$env:GITHUB_REF_NAME" "$archive" --verify-tag --title "$env:GITHUB_REF_NAME" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release upload failed.' }
