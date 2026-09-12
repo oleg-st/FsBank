@@ -1,0 +1,4 @@
+*.user
+.vs
+src/FsBank.Scanner/obj/
+src/FsBank.Scanner/bin/
