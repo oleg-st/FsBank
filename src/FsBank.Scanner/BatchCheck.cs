@@ -70,6 +70,28 @@ internal static class BatchCheck
             Require(items.Length==6 && items.Select(x=>x.GetProperty("file").GetString()).Distinct().Count()==6,"Duplicate cell filenames collided");
             Require(doc.RootElement.GetProperty("summary").GetProperty("tabs").GetArrayLength()==7,"Empty tab omitted");
         }
+        var allOrder=new List<int>();
+        string all=BatchScan.Run(Path.Combine(output,"all"),(index,folder)=>
+        {
+            allOrder.Add(index);
+            WriteSession(index,folder);
+        },_=>{},CancellationToken.None,everything:true);
+        Require(allOrder.SequenceEqual(Enumerable.Range(-2,9)),"All scan must visit equipped, inventory and seven bank tabs");
+        BatchRecognition.Run(all,folder=>
+        {
+            File.WriteAllText(Path.Combine(folder,"full.json"),"{\"items\":[{\"file\":\"r01_c01.png\",\"item\":{\"Name\":\"Test <item>\"}}]}");
+            return Path.Combine(folder,"report.html");
+        },_=>{},CancellationToken.None);
+        using(var compact=JsonDocument.Parse(File.ReadAllText(Path.Combine(all,"items.json"))))
+        {
+            var items=compact.RootElement.EnumerateArray().ToArray();
+            Require(items.Length==9,"Combined export lost items");
+            Require(items[0].GetProperty("location").GetProperty("type").GetString()=="equipped" && items[1].GetProperty("location").GetProperty("type").GetString()=="inventory","Character locations lost");
+            Require(items[0].GetProperty("location").GetProperty("tab").ValueKind==JsonValueKind.Null,"Equipped item assigned bank tab");
+            Require(items[8].GetProperty("location").GetProperty("tab").GetInt32()==7,"Last bank tab lost");
+            string html=File.ReadAllText(Path.Combine(all,"items.html"));
+            Require(html.Contains("equipped/r01_c01.png") && html.Contains("tab-07/r01_c01.png") && html.Contains("Test &lt;item&gt;") && !html.Contains("location_type"),"Compact HTML images, escaping or schema incorrect");
+        }
         var pixels=Pixels.Load(Path.Combine(sampleSession,"baseline.png"));var bank=new Vision().FindBank(pixels) ?? throw new InvalidOperationException("Sample bank not found");
         Require(Vision.ActiveTab(pixels,bank)>=0,"Active sample tab not recognized");
         using(var strip=pixels.Crop(bank.Tabs).Bitmap())

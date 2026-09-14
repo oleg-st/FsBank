@@ -2,10 +2,11 @@ using System.Text.Json;
 
 namespace FsBank.Scanner;
 
-internal sealed class BatchTab(int number)
+internal sealed class BatchTab(int number, string locationType="bank")
 {
     public int Tab { get; } = number;
-    public string Folder { get; } = $"tab-{number:00}";
+    public string LocationType { get; } = locationType;
+    public string Folder { get; } = locationType=="bank" ? $"tab-{number:00}" : locationType;
     public string Status { get; set; } = "pending";
     public int Captured { get; set; }
     public int Missing { get; set; }
@@ -14,16 +15,16 @@ internal sealed class BatchTab(int number)
 internal static class BatchScan
 {
     // Separate orchestration from game input, so cancellation/partial batches can be tested offline.
-    public static string Run(string root, Action<int,string> scanTab, Action<string> log, CancellationToken token)
+    public static string Run(string root, Action<int,string> scanTab, Action<string> log, CancellationToken token,bool everything=false)
     {
         token.ThrowIfCancellationRequested();
         root=Path.GetFullPath(root);
-        string folder=Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-all-tabs");
+        string folder=Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+(everything ? "-all" : "-all-tabs"));
         Directory.CreateDirectory(folder);
-        var tabs=Enumerable.Range(1,BankGeometry.TabCount).Select(n=>new BatchTab(n)).ToArray();
+        var tabs=(everything ? new[]{new BatchTab(-1,"equipped"),new BatchTab(0,"inventory")} : Array.Empty<BatchTab>()).Concat(Enumerable.Range(1,BankGeometry.TabCount).Select(n=>new BatchTab(n))).ToArray();
         string status="running";string? error=null;
         void Save() => File.WriteAllText(Path.Combine(folder,"batch.json"),JsonSerializer.Serialize(new
-        { Status=status,Error=error,Mode="all_tabs",TabCount=BankGeometry.TabCount,TooltipMode="alt_details",Tabs=tabs },new JsonSerializerOptions{WriteIndented=true}));
+        { Status=status,Error=error,Mode=everything ? "all" : "all_tabs",TabCount=BankGeometry.TabCount,TooltipMode="alt_details",Tabs=tabs },new JsonSerializerOptions{WriteIndented=true}));
         Save();
         try
         {
@@ -31,14 +32,14 @@ internal static class BatchScan
             {
                 token.ThrowIfCancellationRequested();
                 tab.Status="running";Save();
-                log($"Tab {tab.Tab}/{BankGeometry.TabCount}");
+                log($"Scanning {tab.Folder}");
                 try
                 {
                     scanTab(tab.Tab-1,Path.Combine(folder,tab.Folder));
                     using var session=JsonDocument.Parse(File.ReadAllText(Path.Combine(folder,tab.Folder,"session.json")));
                     var record=session.RootElement;
                     if(record.GetProperty("Status").GetString()!="completed")throw new InvalidOperationException("Tab capture did not complete: "+record.GetProperty("Status").GetString());
-                    if(record.GetProperty("ActiveTab").GetInt32()!=tab.Tab)throw new InvalidOperationException("The captured tab number does not match the requested tab.");
+                    if(tab.LocationType=="bank" && record.GetProperty("ActiveTab").GetInt32()!=tab.Tab)throw new InvalidOperationException("The captured tab number does not match the requested tab.");
                     var cells=record.GetProperty("Cells").EnumerateArray().ToArray();
                     tab.Captured=cells.Count(c=>c.GetProperty("Status").GetString()=="captured");
                     tab.Missing=cells.Count(c=>c.GetProperty("Status").GetString() is not ("captured" or "empty"));

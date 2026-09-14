@@ -16,6 +16,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         private DesktopCapture? capture;
         private Rectangle client;
         public Vision Vision { get; } = new();
+        public Point? ExpectedCursor { get; set; }
         public DesktopCapture Get(Rectangle bounds)
         {
             if(capture is not null && client!=bounds)
@@ -52,12 +53,46 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
             RunCore(root,hoverMs,token,tab,folder,context);
         },log,token);
     }
+    public void RunEverything(string root,int hoverMs,CancellationToken token)
+    {
+        nint game=Native.FindGame();
+        Native.GetCursorPos(out var originalCursor);
+        using var context=new CaptureContext();
+        bool first=true;
+        try
+        {
+            BatchScan.Run(root,(index,folder)=>
+            {
+                token.ThrowIfCancellationRequested();
+                if(!first)
+                {
+                    if(Native.GetForegroundWindow()!=game ||
+                        (context.ExpectedCursor is Point expected && Native.GetCursorPos(out var current) &&
+                        (Math.Abs(current.X-expected.X)>CursorTolerancePx || Math.Abs(current.Y-expected.Y)>CursorTolerancePx)))
+                        throw new OperationCanceledException("Focus or mouse changed between scan locations.");
+                    // Let the last park and Alt release render before detecting the next panel.
+                    if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
+                }
+                var target=index==-2 ? ScanTarget.Equipped : index==-1 ? ScanTarget.Inventory : ScanTarget.Bank;
+                RunCore(root,hoverMs,token,target==ScanTarget.Bank ? index : null,folder,context,target,restoreCursor:false);
+                first=false;
+            },log,token,everything:true);
+        }
+        finally
+        {
+            // Restore only once, and never override intervening user input.
+            if(context.ExpectedCursor is Point expected && Native.GetForegroundWindow()==game &&
+                Native.GetCursorPos(out var current) && current==expected)
+                Native.SetCursorPos(originalCursor.X,originalCursor.Y);
+        }
+    }
+
     public void Run(string root,int hoverMs,CancellationToken token,ScanTarget target=ScanTarget.Bank)
     {
         using var context=new CaptureContext();
         RunCore(root,hoverMs,token,null,null,context,target);
     }
-    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank)
+    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank,bool restoreCursor=true)
     {
         var preparation=Stopwatch.StartNew();
         if(target!=ScanTarget.Bank && targetTab is not null)throw new ArgumentException("Only bank scans have tabs.");
@@ -82,11 +117,26 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         double initialFrameMs=stage.Elapsed.TotalMilliseconds;
         stage.Restart();
         var fullLayout=vision.FindLayout(initial,target);
+        while(fullLayout is null && !restoreCursor && stage.ElapsedMilliseconds<TooltipClearTimeoutMs)
+        {
+            token.ThrowIfCancellationRequested();
+            if(Native.GetForegroundWindow()!=hwnd || Native.ClientBounds(hwnd)!=client ||
+                (context.ExpectedCursor is Point expected && Native.GetCursorPos(out var current) &&
+                (Math.Abs(current.X-expected.X)>CursorTolerancePx || Math.Abs(current.Y-expected.Y)>CursorTolerancePx)))
+                throw new OperationCanceledException("Focus or mouse changed while waiting for the next panel.");
+            if(token.WaitHandle.WaitOne(ActivationPollMs))token.ThrowIfCancellationRequested();
+            initial=Next(capture,client,token,Stopwatch.GetTimestamp());
+            fullLayout=vision.FindLayout(initial,target);
+        }
         double panelSearchMs=stage.Elapsed.TotalMilliseconds;
         if(fullLayout is null)
         {
-            log(target==ScanTarget.Bank ? "Stash not detected. Open the stash (STASH), then try again." : "Character panel not detected. Open the character window with all slots visible, then try again.");
-            return;
+            if(sessionFolder is not null)
+            {
+                Directory.CreateDirectory(sessionFolder);
+                initial.Save(Path.Combine(sessionFolder,"panel-not-detected.png"));
+            }
+            throw new InvalidOperationException(target==ScanTarget.Bank ? "Stash not detected. Open the stash (STASH), then try again." : "Character panel not detected. Open the character window with all slots visible, then try again.");
         }
         log($"{fullLayout.LocationType} detected, scale {fullLayout.Scale:F2}. Checking {fullLayout.SlotCount} slots ({fullLayout.RowCount}×{fullLayout.ColumnCount}).");
         int offset=target==ScanTarget.Bank ? Math.Max(0,fullLayout.Bounds.Left-(int)(CaptureLeftMarginPx*fullLayout.Scale)) : 0;
@@ -113,7 +163,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         {
             Check(); var target=new Point(local.X+region.Left,local.Y+region.Top);
             if(!Native.SetCursorPos(target.X,target.Y))throw new InvalidOperationException("Failed to move the mouse.");
-            expectedCursor=target;lastInput=Stopwatch.GetTimestamp();
+            expectedCursor=target;context.ExpectedCursor=target;lastInput=Stopwatch.GetTimestamp();
         }
         var session=sessionFolder ?? Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+(target==ScanTarget.Bank ? "" : "-"+layout.LocationType));
         Directory.CreateDirectory(session);
@@ -421,7 +471,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                     ,ActiveTab=activeTab+1,RequestedTab=targetTab+1
                 },new JsonSerializerOptions{WriteIndented=true}));
                 // Do not fight a user who moved the cursor or changed applications.
-                if(expectedCursor is Point p && Native.GetForegroundWindow()==hwnd && Native.GetCursorPos(out var current) && current==p)
+                if(restoreCursor && expectedCursor is Point p && Native.GetForegroundWindow()==hwnd && Native.GetCursorPos(out var current) && current==p)
                     Native.SetCursorPos(originalCursor.X,originalCursor.Y);
                 log($"Saved {results.Count(x=>x.File is not null && File.Exists(Path.Combine(session,x.File)))}; folder: {session}");
             }

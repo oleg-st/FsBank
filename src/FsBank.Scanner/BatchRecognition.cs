@@ -29,33 +29,35 @@ internal static class BatchRecognition
         {
             token.ThrowIfCancellationRequested();
             int number=tab.GetProperty("Tab").GetInt32();
-            if(number<1 || number>BankGeometry.TabCount)throw new InvalidOperationException("Invalid tab number in batch.json.");
-            string name=$"tab-{number:00}",session=Path.Combine(folder,name);
+            string location=tab.TryGetProperty("LocationType",out var kind) ? kind.GetString() ?? "bank" : "bank";
+            if(location is not ("bank" or "equipped" or "inventory"))throw new InvalidDataException("Unknown scan location.");
+            if(location=="bank" && (number<1 || number>BankGeometry.TabCount))throw new InvalidOperationException("Invalid tab number in batch.json.");
+            string name=location=="bank" ? $"tab-{number:00}" : location,session=Path.Combine(folder,name);
             string status=tab.GetProperty("Status").GetString() ?? "unknown";
             bool available=Directory.Exists(session) && (File.Exists(Path.Combine(session,"session.json")) || Directory.EnumerateFiles(session,"r??_c??.png").Any());
             int count=0;
             if(available)
             {
-                log($"OCR: tab {number}/{BankGeometry.TabCount}");
+                log($"OCR: {name}");
                 recognizeTab(session);
                 var data=JsonNode.Parse(File.ReadAllText(CompactExport.FullReportPath(session)))!;
                 foreach(var row in data["items"]!.AsArray())
                 {
-                    var copy=row!.DeepClone();copy["tab"]=number;
+                    var copy=row!.DeepClone();copy["tab"]=location=="bank" ? JsonValue.Create(number) : null;copy["location_type"]=location;
                     copy["file"]=name+"/"+copy["file"]!.GetValue<string>();
                     combined.Add(copy);count++;
                 }
-                links.Add($"<li><a href='{name}/report.html'>Tab {number}</a>: {count} items; capture status: {WebUtility.HtmlEncode(status)}</li>");
+                links.Add($"<li><a href='{name}/report.html'>{name}</a>: {count} items; capture status: {WebUtility.HtmlEncode(status)}</li>");
             }
-            else links.Add($"<li>Tab {number}: no captures; capture status: {WebUtility.HtmlEncode(status)}</li>");
-            summaries.Add(new JsonObject { ["tab"]=number,["capture_status"]=status,["items"]=count,["recognition_status"]=available ? "needs_visual_review" : "not_scanned" });
+            else links.Add($"<li>{name}: no captures; capture status: {WebUtility.HtmlEncode(status)}</li>");
+            summaries.Add(new JsonObject { ["tab"]=number,["location_type"]=location,["capture_status"]=status,["items"]=count,["recognition_status"]=available ? "needs_visual_review" : "not_scanned" });
         }
         token.ThrowIfCancellationRequested();
         var summary=new JsonObject { ["items"]=combined.Count,["tabs"]=summaries,["status"]="needs_visual_review",["capture_status"]=batch.RootElement.GetProperty("Status").GetString() };
         File.WriteAllText(Path.Combine(output,"full.json"),new JsonObject { ["summary"]=summary,["items"]=combined }.ToJsonString(new JsonSerializerOptions{WriteIndented=true}));
         CompactExport.Write(output, combined.Select(row => JsonSerializer.SerializeToElement(row)));
         string report=Path.Combine(output,"report.html");
-        File.WriteAllText(report,"<!doctype html><html lang='en'><meta charset='utf-8'><title>FsBank — all tabs</title><style>body{font:18px system-ui;background:#14202c;color:#eee;margin:32px}a{color:#8bd0ff}li{margin:14px 0}</style><h1>All-tabs recognition</h1><p>Total items: "+combined.Count+". Results require review. Empty or incomplete tabs are marked separately.</p><ul>"+string.Join("",links)+"</ul></html>");
+        File.WriteAllText(report,"<!doctype html><html lang='en'><meta charset='utf-8'><title>FsBank — all tabs</title><style>body{font:18px system-ui;background:#14202c;color:#eee;margin:32px}a{color:#8bd0ff}li{margin:14px 0}</style><h1>Batch recognition</h1><p><a href='items.html'>Compact items</a></p><p>Total items: "+combined.Count+". Results require review. Empty or incomplete tabs are marked separately.</p><ul>"+string.Join("",links)+"</ul></html>");
         return report;
     }
 }
