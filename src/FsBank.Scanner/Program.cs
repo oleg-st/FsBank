@@ -6,6 +6,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if(args.Length==2 && args[0]=="--verify-export")
+        {
+            try { ScanExportCheck.Run(Path.GetFullPath(args[1])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
         if(args.Length==3 && args[0]=="--verify-character-panel")
         {
             try { EquippedCheck.CharacterPanel(args[1],args[2]); }

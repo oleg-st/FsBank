@@ -6,7 +6,7 @@ internal sealed class BatchTab(int number, string locationType="bank")
 {
     public int Tab { get; } = number;
     public string LocationType { get; } = locationType;
-    public string Folder { get; } = locationType=="bank" ? $"tab-{number:00}" : locationType;
+    public string Folder { get; } = locationType=="bank" ? (number>0 ? $"tab-{number:00}" : "tab") : locationType;
     public string Status { get; set; } = "pending";
     public int Captured { get; set; }
     public int Missing { get; set; }

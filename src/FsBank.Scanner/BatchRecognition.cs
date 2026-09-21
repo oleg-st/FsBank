@@ -31,8 +31,8 @@ internal static class BatchRecognition
             int number=tab.GetProperty("Tab").GetInt32();
             string location=tab.TryGetProperty("LocationType",out var kind) ? kind.GetString() ?? "bank" : "bank";
             if(location is not ("bank" or "equipped" or "inventory"))throw new InvalidDataException("Unknown scan location.");
-            if(location=="bank" && (number<1 || number>BankGeometry.TabCount))throw new InvalidOperationException("Invalid tab number in batch.json.");
-            string name=location=="bank" ? $"tab-{number:00}" : location,session=Path.Combine(folder,name);
+            if(location=="bank" && (number<0 || number>BankGeometry.TabCount))throw new InvalidOperationException("Invalid tab number in batch.json.");
+            string name=location=="bank" ? (number>0 ? $"tab-{number:00}" : "tab") : location,session=Path.Combine(folder,name);
             string status=tab.GetProperty("Status").GetString() ?? "unknown";
             bool available=Directory.Exists(session) && (File.Exists(Path.Combine(session,"session.json")) || Directory.EnumerateFiles(session,"r??_c??.png").Any());
             int count=0;
@@ -43,7 +43,7 @@ internal static class BatchRecognition
                 var data=JsonNode.Parse(File.ReadAllText(CompactExport.FullReportPath(session)))!;
                 foreach(var row in data["items"]!.AsArray())
                 {
-                    var copy=row!.DeepClone();copy["tab"]=location=="bank" ? JsonValue.Create(number) : null;copy["location_type"]=location;
+                    var copy=row!.DeepClone();copy["tab"]=location=="bank" && number>0 ? JsonValue.Create(number) : null;copy["location_type"]=location;
                     copy["file"]=name+"/"+copy["file"]!.GetValue<string>();
                     combined.Add(copy);count++;
                 }

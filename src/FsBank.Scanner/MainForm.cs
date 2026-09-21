@@ -13,6 +13,7 @@ internal sealed class MainForm : Form
     private readonly Button stop = new() { Text="Stop — Esc",AutoSize=true,Enabled=false };
     private readonly Button recognize = new() { Text="Recognize latest capture", AutoSize=true };
     private readonly Button scanAllTabs = new() { Text="Scan all bank tabs", AutoSize=true };
+    private readonly CheckBox debugMode = new() { Text="Debug mode (save diagnostics)", AutoSize=true, Checked=false };
     private readonly TextBox folder = new() { Width=FolderInputWidth,Text=Path.Combine(Directory.GetCurrentDirectory(),GameConstants.ItemsFolder) };
     private readonly TextBox log = new() { Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill };
     private CancellationTokenSource? cancellation;
@@ -28,7 +29,7 @@ internal sealed class MainForm : Form
         controls.Controls.Add(scanEquippedManual);controls.SetFlowBreak(scanEquippedManual,true);
         controls.Controls.Add(new Label {Text="Folder:",AutoSize=true,Margin=new(SmallGap,FolderLabelTopGap,SmallGap,SmallGap)}); controls.Controls.Add(folder);
         var open=new Button {Text="Open folder",AutoSize=true};controls.Controls.Add(open);
-        controls.SetFlowBreak(open,true); controls.Controls.Add(recognize);
+        controls.SetFlowBreak(open,true); controls.Controls.Add(recognize); controls.Controls.Add(debugMode);
         recognize.Click+=async (_,_)=>await Recognize();
         open.Click+=(_,_)=> {Directory.CreateDirectory(folder.Text); System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(folder.Text){UseShellExecute=true});};
         Controls.Add(log);Controls.Add(controls);
@@ -61,7 +62,11 @@ internal sealed class MainForm : Form
             Write("Alt+Esc is unavailable: press Esc or use Stop to stop.");
         try
         {
-            string output=Path.GetFullPath(folder.Text);
+            using var export = new ScanExport(Path.GetFullPath(folder.Text), debugMode.Checked);
+            debugMode.Enabled=false;
+            string output=export.WorkingRoot;
+            try
+            {
             if(manual)
             {
                 using var overlay=new ManualOverlay();
@@ -100,11 +105,14 @@ internal sealed class MainForm : Form
                     catch(Exception e) when(captureError is not null) { Write("OCR error: " + e.Message); }
                 }
             });
+            }
+            finally { await Task.Run(() => export.Complete(Write)); }
         }
         catch(OperationCanceledException){Write("Capture stopped. Tooltips already captured have been saved.");}
         catch(Exception e){Write("Error: "+e.Message);}
         finally
         {
+            debugMode.Enabled=true;
             Native.UnregisterHotKey(Handle,Native.StopHotkeyId);
             Native.UnregisterHotKey(Handle,Native.AltStopHotkeyId);
             cancellation.Dispose();cancellation=null;scanEverything.Enabled=true;scanEquippedManual.Enabled=true;scanCurrentTab.Enabled=true;scanAllTabs.Enabled=true;scanEquipped.Enabled=true;scanInventory.Enabled=true;recognize.Enabled=true;stop.Enabled=false;folder.Enabled=true;
