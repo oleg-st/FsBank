@@ -365,7 +365,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                 }
                 var rect=layout.Cell(cell.Row,cell.Col);var hover=new Point(rect.X+rect.Width/2,rect.Y+rect.Height/2);Move(hover);
                 var watch=Stopwatch.StartNew();
-                Pixels? candidate=null;Tooltip? located=null;int stable=0;bool saved=false;int headerRetries=0;bool incompleteHeader=false;
+                Pixels? candidate=null;Pixels? lastTooltipFrame=null;Tooltip? located=null;int stable=0;bool saved=false;int headerRetries=0;bool incompleteHeader=false;
                 // Delay the first probe to avoid polling before the tooltip can appear.
                 // A queued frame rendered AFTER the hover is valid even if it predates
                 // the end of this sleep; requiring a later timestamp wastes another frame.
@@ -374,7 +374,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                 long nextFullSearch=FirstFullSearchMs;
                 while(watch.ElapsedMilliseconds<TooltipTimeoutMs)
                 {
-                    Check();var frame=Read();
+                    Check();var frame=Read();lastTooltipFrame=frame;
                     long searchStart=Stopwatch.GetTimestamp();Tooltip? found=null;
                     if(located is not null)
                     {
@@ -432,9 +432,13 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                 }
                 if(!saved)
                 {
+                    // Preserve the last hovered frame before parking overwrites
+                    // the capture buffer, including failures without a footer match.
+                    string diagnostic=$"r{cell.Row+1:00}_c{cell.Col+1:00}-tooltip-failed.png";
+                    lastTooltipFrame?.Save(Path.Combine(session,diagnostic));
                     timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
                     results.Add(new(cell.Row+1,cell.Col+1,incompleteHeader ? "incomplete_tooltip" : "no_stable_tooltip",null,located?.Bounds,watch.Elapsed.TotalMilliseconds,timing));
-                    log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "full header not confirmed; diagnostic frames saved" : "stable tooltip not found")}.");
+                    log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "full header not confirmed" : "stable tooltip not found")} (total {timing.TotalMs:F0} ms; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; full searches {timing.FullSearchCalls}); diagnostic: {diagnostic}.");
                     // Clear any late tooltip, including one that did not reach stability.
                     Move(layout.Park);Thread.Sleep(FailedTooltipParkMs);var f=Read();
                     previous=vision.FindTooltip(f,layout.Scale);

@@ -213,8 +213,10 @@ internal sealed class Vision
                 colorCount=0;colorGap=0;
             }
         }
-        var rect=Rectangle.FromLTRB(left-(int)Math.Ceiling(CropLeftPaddingPx*scale),Math.Max(0,top-(int)Math.Ceiling(CropTopPaddingPx*scale)),
-            right+(int)Math.Ceiling(CropRightPaddingPx*scale),Math.Min(frame.Height,bottom));
+        // The outlines must be visible, but optional crop padding may extend
+        // beyond the window when the game clamps a tooltip to the screen edge.
+        var rect=Rectangle.FromLTRB(Math.Max(0,left-(int)Math.Ceiling(CropLeftPaddingPx*scale)),Math.Max(0,top-(int)Math.Ceiling(CropTopPaddingPx*scale)),
+            Math.Min(frame.Width,right+(int)Math.Ceiling(CropRightPaddingPx*scale)),Math.Min(frame.Height,bottom));
         if(rect.Height<MinimumHeightPx*scale || !frame.Bounds.Contains(rect)) return null;
         if(repairHeader && !TooltipSegmenter.HasCompleteTitle(frame.Crop(rect),scale))
         {
@@ -266,7 +268,9 @@ internal sealed class Vision
         int margin=(int)Math.Ceiling(NearSearchPaddingPx*scale);
         int preferred=hover.X+(int)Math.Round((CursorGapPx+FooterLeftInsetPx)*scale);
         var candidates=new List<int>{preferred};
-        if(preferred+footerWidth+margin>=frame.Width)
+        // Placement depends on the whole tooltip, not only its shorter footer.
+        int preferredRight=hover.X+(int)Math.Ceiling((CursorGapPx+TypicalWidthPx+ScreenEdgeMarginPx)*scale);
+        if(preferredRight+margin>=frame.Width)
         {
             candidates.Add(frame.Width-(int)Math.Round((TypicalWidthPx+ScreenEdgeMarginPx-FooterLeftInsetPx)*scale));
             candidates.Add(hover.X-(int)Math.Round((CursorGapPx+TypicalWidthPx-FooterLeftInsetPx)*scale));
@@ -287,7 +291,7 @@ internal sealed class Vision
     private static int FindEdge(Pixels frame,int start,int end,int y,double scale)
     {
         int best=-1,bestCount=0;
-        for(int x=Math.Max(EdgeScanInsetPx,start);x<Math.Min(frame.Width-EdgeScanInsetPx,end);x++)
+        for(int x=Math.Max(EdgeNeighborDistancePx,start);x<Math.Min(frame.Width-EdgeNeighborDistancePx,end);x++)
         {
             int count=0;
             for(int yy=y;yy>=Math.Max(0,y-(int)(EdgeSampleHeightPx*scale));yy--) if(Edge(frame,x,yy)) count++;

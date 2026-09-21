@@ -6,6 +6,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if(args.Length==3 && args[0]=="--verify-tooltip-edge")
+        {
+            try { VisionBenchmark.EdgeRegression(args[1],args[2]); }
+            catch(Exception e) { File.WriteAllText(args[2]+".error",e.ToString());Environment.ExitCode=1; }
+            return;
+        }
         if(args.Length==3 && args[0]=="--verify-manual-startup")
         {
             try { ManualStartupCheck.Run(args[1],args[2]); }

@@ -5,6 +5,32 @@ namespace FsBank.Scanner;
 
 internal static class VisionBenchmark
 {
+    public static void EdgeRegression(string cropPath,string output)
+    {
+        var crop=Pixels.Load(cropPath);
+        var vision=new Vision();var results=new List<object>();
+        // Replay a real tooltip at the right edge of both a 1080p client and
+        // its bank capture region. Remove only external padding, never outlines.
+        foreach(int width in new[]{1920,1080})
+        foreach(int clippedPadding in new[]{0,1})
+        {
+            var frame=new Pixels(width,1080);
+            int x=width-crop.Width+clippedPadding,y=200;
+            for(int row=0;row<crop.Height;row++)
+                Buffer.BlockCopy(crop.Data,row*crop.Width*Pixels.BytesPerPixel,frame.Data,frame.Offset(x,y+row),(crop.Width-clippedPadding)*Pixels.BytesPerPixel);
+            // Full panel runs out of room while the shorter footer still fits.
+            var cursor=new Point(width-290,400);
+            var full=vision.FindTooltip(frame,1);
+            var near=vision.FindTooltipNear(frame,1,cursor);
+            if(full is null || near!=full || !TooltipSegmenter.HasCompleteTitle(frame.Crop(full.Bounds),1))
+                throw new InvalidOperationException($"Edge tooltip missed: width={width}, clipped padding={clippedPadding}.");
+            if(!vision.FooterPresentNear(frame,1,cursor) || !vision.TooltipNearCursor(frame,1,cursor,full))
+                throw new InvalidOperationException("Edge footer/cursor checks disagree.");
+            results.Add(new {Width=width,ClippedPadding=clippedPadding,full.Bounds});
+        }
+        File.WriteAllText(output,JsonSerializer.Serialize(results,new JsonSerializerOptions{WriteIndented=true}));
+    }
+
     // Replay real saved crops over their captured baseline. No game input or live capture.
     public static void Run(string session,string output)
     {
