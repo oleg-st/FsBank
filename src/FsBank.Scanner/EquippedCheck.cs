@@ -4,6 +4,31 @@ namespace FsBank.Scanner;
 
 internal static class EquippedCheck
 {
+    public static void CharacterPanel(string reference,string output)
+    {
+        Directory.CreateDirectory(output);
+        var pixels=Pixels.Load(reference);
+        var vision=new Vision();
+        var layout=vision.FindEquipped(pixels) ?? throw new InvalidOperationException("Equipment panel not detected");
+        void Require(bool ok,string message) { if(!ok)throw new InvalidOperationException(message); }
+        Require(vision.FindEquippedFast(pixels)==layout,"Fast detection differs from full detection");
+        Require(vision.PanelStillOpen(pixels,layout),"Detected panel fails tracking");
+        var inventory=(InventoryLayout?)vision.FindLayout(pixels,ScanTarget.Inventory);
+        Require(inventory is not null && inventory.Anchor==layout.Anchor && inventory.ContentOffsetX==layout.ContentOffsetX,"Inventory geometry differs");
+        Require(layout.Slots().All(s=>Vision.Occupied(pixels,s.Bounds)),"Missed occupied equipment slot");
+        var negative=pixels.Crop(pixels.Bounds);
+        var markers=layout.Relative(new Rectangle(-4,-4,108,104));
+        for(int y=markers.Top;y<markers.Bottom;y++)Array.Clear(negative.Data,negative.Offset(markers.Left,y),markers.Width*Pixels.BytesPerPixel);
+        Require(!vision.PanelStillOpen(negative,layout) && vision.FindEquipped(negative) is null,"Panel accepted without headings");
+        Require(vision.FindEquipped(new Pixels(pixels.Width,pixels.Height)) is null,"Blank frame accepted");
+        using var annotated=pixels.Bitmap();
+        using(var g=Graphics.FromImage(annotated))
+        using(var pen=new Pen(Color.Lime,2))
+            foreach(var slot in layout.Slots())g.DrawRectangle(pen,slot.Bounds);
+        annotated.Save(Path.Combine(output,"slots.png"));
+        File.WriteAllText(Path.Combine(output,"layout.json"),JsonSerializer.Serialize(layout));
+        File.WriteAllText(Path.Combine(output,"checks.txt"),"Passed: full/fast detection, panel tracking, 14 occupied slots, inventory geometry, missing-heading and blank-frame rejection. No live game input.");
+    }
     public static void Run(string reference, string output)
     {
         Directory.CreateDirectory(output);

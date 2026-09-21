@@ -54,6 +54,7 @@ internal sealed record Tooltip(Rectangle Bounds, Rectangle Footer);
 
 internal sealed class Vision
 {
+    private const double CharacterPatternMaxError=36;
     private readonly Pixels title = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets",TitleAsset));
     private readonly Pixels footer = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets",FooterAsset));
     private readonly Dictionary<double, Pattern> titles = new(), footers = new();
@@ -90,10 +91,10 @@ internal sealed class Vision
     internal Size EquippedPatternSize(double scale) => new(Power(scale).Width,Power(scale).Height);
     internal EquippedLayout? FindEquippedIn(Pixels frame,double scale,Rectangle area)
     {
-        var found=Power(scale).Find(frame,area);
+        var found=Power(scale).Find(frame,area,CharacterPatternMaxError);
         if(found is null)return null;
         var layout=new EquippedLayout(Rectangle.Empty,found.Value.Point,scale);
-        layout=layout with {Bounds=layout.Relative(CharacterLayout.PanelOffset)};
+        layout=(EquippedLayout)WithCharacterGeometry(frame,layout);
         return frame.Bounds.Contains(layout.Bounds) && frame.Bounds.Contains(layout.Grid) && PanelStillOpen(frame,layout) ? layout : null;
     }
     private CharacterLayout? FindCharacter(Pixels frame,ScanTarget target)
@@ -101,13 +102,35 @@ internal sealed class Vision
         double basis = frame.Height/(double)GameConstants.ReferenceHeight;
         foreach(double scale in new[] {basis,NativeScale}.Concat(RelativeScales.ToArray().Skip(1).Select(s=>basis*s)).Distinct())
         {
-            var found=Power(scale).Find(frame,frame.Bounds);
+            var found=Power(scale).Find(frame,frame.Bounds,CharacterPatternMaxError);
             if(found is null)continue;
             CharacterLayout layout=target==ScanTarget.Equipped ? new EquippedLayout(Rectangle.Empty,found.Value.Point,scale) : new InventoryLayout(Rectangle.Empty,found.Value.Point,scale);
-            layout=layout with {Bounds=layout.Relative(CharacterLayout.PanelOffset)};
+            layout=WithCharacterGeometry(frame,layout);
             if(frame.Bounds.Contains(layout.Bounds) && frame.Bounds.Contains(layout.Grid) && PanelStillOpen(frame,layout))return layout;
         }
         return null;
+    }
+    private static CharacterLayout WithCharacterGeometry(Pixels frame,CharacterLayout layout)
+    {
+        // The scrollbar is a long neutral grey stroke to the right of POWER.
+        // Require continuity over most of the stats area, not a single bright pixel.
+        var search=layout.Relative(new Rectangle(125,10,18,390));
+        search.Intersect(frame.Bounds);
+        bool scrollbar=false;
+        for(int x=search.Left;x<search.Right && !scrollbar;x++)
+        {
+            int count=0,total=0;
+            for(int y=search.Top;y<search.Bottom;y+=3)
+            {
+                int i=frame.Offset(x,y),b=frame.Data[i],g=frame.Data[i+1],r=frame.Data[i+2];
+                if(Math.Min(r,Math.Min(g,b))>85 && Math.Max(r,Math.Max(g,b))-Math.Min(r,Math.Min(g,b))<20)count++;
+                total++;
+            }
+            scrollbar=total>0 && count>total*.85;
+        }
+        int offset=scrollbar ? 16 : 0;
+        var panel=CharacterLayout.PanelOffset;panel.X+=offset;
+        return layout with {ContentOffsetX=offset,Bounds=layout.Relative(panel)};
     }
     public BankLayout? FindBank(Pixels frame)
     {
@@ -139,7 +162,7 @@ internal sealed class Vision
         int padding=(int)Math.Ceiling(TitleTrackingPaddingPx*layout.Scale);
         var power=layout.Relative(new(0,0,equippedPower.Width,equippedPower.Height));power.Inflate(padding,padding);
         var statsArea=layout.VerificationArea;statsArea.Inflate(padding,padding);
-        return Power(layout.Scale).Find(frame,power) is not null && Stats(layout.Scale).Find(frame,statsArea) is not null;
+        return Power(layout.Scale).Find(frame,power,CharacterPatternMaxError) is not null && Stats(layout.Scale).Find(frame,statsArea,CharacterPatternMaxError) is not null;
     }
     public bool BankStillOpen(Pixels frame,BankLayout bank)
     {

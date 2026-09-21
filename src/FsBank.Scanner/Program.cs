@@ -6,6 +6,12 @@ internal static class Program
     private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if(args.Length==3 && args[0]=="--verify-character-panel")
+        {
+            try { EquippedCheck.CharacterPanel(args[1],args[2]); }
+            catch(Exception e) { Directory.CreateDirectory(args[2]);File.WriteAllText(Path.Combine(args[2],"error.txt"),e.ToString());Environment.ExitCode=1; }
+            return;
+        }
         if(args.Length==3 && args[0]=="--verify-tooltip-edge")
         {
             try { VisionBenchmark.EdgeRegression(args[1],args[2]); }

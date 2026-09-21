@@ -49,6 +49,9 @@ internal sealed record BankLayout(Rectangle Bounds, Point Anchor, double Scale) 
 // Offsets measured from POWER at (890,414) on the 2560x1440 reference.
 internal abstract record CharacterLayout(Rectangle Bounds, Point Anchor, double Scale) : ScanLayout(Bounds,Anchor,Scale)
 {
+    // A visible stats scrollbar shifts the centered headings, but not the slots.
+    public int ContentOffsetX { get; init; }
+    protected Rectangle ContentRelative(Rectangle rect) => Relative(rect with { X=rect.X+ContentOffsetX });
     public static readonly Rectangle PanelOffset = new(-482,-116,648,824);
     public override Rectangle VerificationArea => Relative(new(7,69,78,23));
     public override Point Park => new(Bounds.Left+(int)(32*Scale),Bounds.Bottom-(int)(40*Scale));
@@ -59,7 +62,7 @@ internal sealed record EquippedLayout(Rectangle Bounds, Point Anchor, double Sca
     public override ScanTarget Target => ScanTarget.Equipped;
     public override int RowCount => 7;
     public override int ColumnCount => 2;
-    public override Rectangle Cell(int row,int column) => Relative(new(-442+320*column,64*row,56,56));
+    public override Rectangle Cell(int row,int column) => ContentRelative(new(-442+320*column,64*row,56,56));
 }
 
 // Inventory occupies the three rows below the equipment slots.
@@ -68,5 +71,5 @@ internal sealed record InventoryLayout(Rectangle Bounds, Point Anchor, double Sc
     public override ScanTarget Target => ScanTarget.Inventory;
     public override int RowCount => 3;
     public override int ColumnCount => 9;
-    public override Rectangle Cell(int row,int column) => Relative(new(-444+64*column,450+64*row,56,56));
+    public override Rectangle Cell(int row,int column) => ContentRelative(new(-444+64*column,450+64*row,56,56));
 }
