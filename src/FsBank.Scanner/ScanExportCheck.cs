@@ -6,6 +6,7 @@ internal static class ScanExportCheck
 {
     public static void Run(string root)
     {
+        CheckStatOrigins();
         foreach (bool debug in new[] { false, true })
         foreach (bool partial in new[] { false, true })
         {
@@ -58,5 +59,32 @@ internal static class ScanExportCheck
             if (items.RootElement[0].GetProperty("location").GetProperty("type").GetString() != (location == "unknown" ? "bank" : location))
                 throw new Exception("Incorrect location");
         }
+    }
+
+    private static void CheckStatOrigins()
+    {
+        RecognizedLine Line(int index, string color, string text) =>
+            new(index, new Rectangle(0, index * 12, 100, 10), color, text, 99);
+        var parsed = TooltipParser.Parse([
+            Line(0, "white", "Power Potential 100"),
+            Line(1, "white", "+3 Intellect"),
+            Line(2, "cyan", "+2 Intellect"),
+            Line(3, "cyan", "+2 Intellect"),
+            Line(4, "unknown", "+1 Haste"),
+            Line(5, "white", "Left Alt - Show Details")
+        ]);
+        if (!parsed.Stats.Select(s => s.Origin).SequenceEqual(["base", "dynamic", "dynamic", "unresolved"]))
+            throw new Exception("Incorrect stat origins from tooltip colors");
+        var row = JsonSerializer.SerializeToElement(new { file = "r01_c01.png", item = parsed });
+        var stats = CompactExport.Project(row, 1)["stats"]!.AsArray();
+        if (!stats.Select(s => s!["origin"]!.GetValue<string>()).SequenceEqual(["base", "dynamic", "dynamic", "unresolved"]))
+            throw new Exception("Compact export lost stat origins or repeated stats");
+        using var legacy = JsonDocument.Parse("""
+            {"item":{"Stats":[{"Name":"Intellect","Value":2,"Origin":"fixed_roll"},{"Name":"Haste","Value":1}]}}
+            """);
+        var legacyStats = CompactExport.Project(legacy.RootElement, 1)["stats"]!.AsArray();
+        if (legacyStats[0]!["origin"]!.GetValue<string>() != "dynamic"
+            || legacyStats[1]!["origin"]!.GetValue<string>() != "unresolved")
+            throw new Exception("Incorrect legacy stat origin conversion");
     }
 }

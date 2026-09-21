@@ -91,7 +91,7 @@ internal static class TooltipParser
             if (stats && stat.Success && int.TryParse(stat.Groups[1].Value, out int value))
             {
                 result.Stats.Add(new(stat.Groups[2].Value.Trim(), value,
-                    line.Color == "cyan" ? "fixed_roll" : line.Color == "white" ? "base" : "unresolved", line.Index));
+                    line.Color == "cyan" ? "dynamic" : line.Color == "white" ? "base" : "unresolved", line.Index));
                 continue;
             }
             if (!stats)

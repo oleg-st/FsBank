@@ -17,7 +17,7 @@ internal static class RecognitionCheck
         var stats = first.GetProperty("Stats").EnumerateArray().ToArray();
         Require(stats.Length == 5, "First item has five stat lines");
         Require(stats.Any(s => s.GetProperty("Name").GetString() == "Intellect" && s.GetProperty("Value").GetInt32() == 3 && s.GetProperty("Origin").GetString() == "base"), "Base intellect");
-        Require(stats.Any(s => s.GetProperty("Name").GetString() == "Intellect" && s.GetProperty("Value").GetInt32() == 2 && s.GetProperty("Origin").GetString() == "fixed_roll"), "Fixed intellect");
+        Require(stats.Any(s => s.GetProperty("Name").GetString() == "Intellect" && s.GetProperty("Value").GetInt32() == 2 && s.GetProperty("Origin").GetString() is "dynamic" or "fixed_roll"), "Dynamic intellect");
         var mods = first.GetProperty("Modifiers").EnumerateArray().ToArray();
         Require(mods.Length == 2 && mods[0].GetProperty("Kind").GetString() == "stat" && mods[0].GetProperty("Value").GetInt32() == 7, "Haste modifier is not base");
         var cloak = items["r04_c05.png"].GetProperty("item");

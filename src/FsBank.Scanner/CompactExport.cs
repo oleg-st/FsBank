@@ -74,7 +74,19 @@ internal static class CompactExport
         {
             if (item.TryGetProperty("Stats", out var sourceStats))
                 foreach (var stat in sourceStats.EnumerateArray())
-                    stats.Add(new JsonObject { ["type"] = Value(stat, "Name"), ["value"] = Value(stat, "Value") });
+                {
+                    string? origin = Value(stat, "Origin")?.GetValue<string>();
+                    stats.Add(new JsonObject
+                    {
+                        ["type"] = Value(stat, "Name"), ["value"] = Value(stat, "Value"),
+                        ["origin"] = origin switch
+                        {
+                            "base" => "base",
+                            "dynamic" or "fixed_roll" => "dynamic",
+                            _ => "unresolved"
+                        }
+                    });
+                }
             if (item.TryGetProperty("Modifiers", out var sourceMods))
                 foreach (var mod in sourceMods.EnumerateArray())
                 {
