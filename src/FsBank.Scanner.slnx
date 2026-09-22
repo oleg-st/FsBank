@@ -1,3 +1,4 @@
 <Solution>
-  <Project Path="FsBank.Scanner\FsBank.Scanner.csproj" />
+  <Project Path="FsBank.Scanner\FsBank.Scanner.csproj" DefaultStartup="true" />
+  <Project Path="FsBank.Scanner.Diagnostics\FsBank.Scanner.Diagnostics.csproj" />
 </Solution>

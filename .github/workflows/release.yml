@@ -44,6 +44,9 @@ jobs:
       - name: Verify and package all publish files
         run: |
           $ErrorActionPreference = 'Stop'
+          if (Get-ChildItem -LiteralPath $env:PUBLISH_DIR -Recurse -File -Filter 'FsBank.Scanner.Diagnostics*') {
+            throw 'Diagnostic tools must not be included in the release.'
+          }
           foreach ($file in @('FsBank.Scanner.exe', 'coreclr.dll', 'hostfxr.dll', 'System.Windows.Forms.dll')) {
             if (-not (Test-Path -LiteralPath (Join-Path $env:PUBLISH_DIR $file))) {
               throw "Missing application/runtime file: $file"
