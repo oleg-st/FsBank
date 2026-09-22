@@ -97,7 +97,9 @@ internal static class CompactExport
                     else if (kind == "unresolved") result["text"] = Value(mod, "Lines");
                     else
                     {
-                        result[kind] = Value(mod, "Name");
+                        result[kind] = kind == "set" && Value(mod, "Name") is { } setName
+                            ? JsonValue.Create(Regex.Replace(setName.GetValue<string>(), @"^[^\p{L}]+", ""))
+                            : Value(mod, "Name");
                         if (Value(mod, "Value") is { } amount) result["value"] = amount;
                     }
                     mods.Add(result);
