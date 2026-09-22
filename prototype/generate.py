@@ -33,8 +33,8 @@ def generate(source: Path, destination: Path) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", nargs="?", type=Path, default=ROOT / "sample" / "items.json")
-    parser.add_argument("-o", "--output", type=Path, default=ROOT / "sample" / "item-browser.html")
+    parser.add_argument("input", nargs="?", type=Path, default=ROOT / "docs" / "items.json")
+    parser.add_argument("-o", "--output", type=Path, default=ROOT / "docs" / "item-browser.html")
     args = parser.parse_args()
     try:
         count = generate(args.input, args.output)
