@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FsBank · Item Collection</title>
+<style>
+:root{color-scheme:dark;--bg:#111417;--panel:#181d21;--line:#2a3238;--text:#e5e9e9;--muted:#99a5aa;--accent:#b8df8b;--purple:#cbb0ee;--blue:#9acbe6}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}button,input,select{font:inherit}button,select{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}button{color:inherit}header{height:74px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 30px;gap:20px}.brand{color:inherit;text-decoration:none;font-size:20px;font-weight:750;letter-spacing:-.8px}.brand span{color:var(--accent)}.header-actions{display:flex;gap:16px;align-items:center}.button{background:#252d30;border:1px solid #3b474b;border-radius:7px;padding:8px 13px}.button:hover{background:#323c3f}.layout{display:grid;grid-template-columns:210px minmax(0,1fr);max-width:1920px;margin:auto}.sidebar{position:sticky;top:0;height:100vh;padding:28px 16px;border-right:1px solid var(--line);overflow:auto}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);font-weight:650}.sidebar .eyebrow{padding:0 12px;margin-bottom:14px}.slot-button{display:flex;align-items:center;justify-content:space-between;width:100%;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);padding:10px 12px;margin:3px 0;text-align:left}.slot-button:hover{background:#1e2529;color:var(--text)}.slot-button.active{background:#253126;border-color:#3b4a35;color:var(--accent)}.slot-count{font-size:12px;font-variant-numeric:tabular-nums;opacity:.8}main{min-width:0;padding:32px 30px 60px}.heading{display:flex;justify-content:space-between;gap:24px;align-items:flex-end;margin-bottom:26px}h1{font-size:32px;letter-spacing:-1px;line-height:1.2;margin:8px 0 10px;font-weight:650}.intro{margin:0;color:var(--muted);font-size:13px}.metrics{display:flex;gap:30px;flex-shrink:0}.metric strong{display:block;font-size:25px;font-weight:550;font-variant-numeric:tabular-nums;line-height:1.2}.metric span{font-size:11px;color:var(--muted)}.toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:13px}.search{flex:1;min-width:220px;position:relative}.search svg{position:absolute;top:12px;left:13px;color:var(--muted);pointer-events:none}input[type=search],select{color:var(--text);background:var(--panel);border:1px solid #354047;border-radius:7px;height:42px}input[type=search]{width:100%;padding:0 14px 0 39px}select{padding:0 30px 0 12px;max-width:100%}input::placeholder{color:#839096}.result-line{display:flex;gap:15px;justify-content:space-between;align-items:center;color:var(--muted);font-size:12px;margin:14px 0 28px}.text-button{background:none;border:0;padding:0;color:var(--accent);font-size:12px}.result-actions{display:flex;gap:16px}.slot-section{margin-bottom:34px;scroll-margin-top:15px}.slot-heading{display:flex;align-items:center;gap:12px;margin-bottom:14px}h2{font-size:21px;letter-spacing:-.3px;margin:0;font-weight:600}.count-pill{border:1px solid #364047;border-radius:20px;padding:1px 8px;color:var(--muted);font-size:11px}.slot-heading:after{content:"";height:1px;background:var(--line);flex:1;margin-left:5px}.group{border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:12px;background:var(--panel)}summary{cursor:pointer;display:flex;align-items:center;gap:9px;padding:12px 16px;list-style:none;background:#1d2428}summary::-webkit-details-marker{display:none}summary:before{content:"›";color:var(--muted);font-size:19px;line-height:1;transform:rotate(0);transition:transform .12s}.group[open]>summary:before{transform:rotate(90deg)}.group-title{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.group-kind{font-size:11px;color:var(--purple)}.group-name{font-weight:600;font-size:13px}.group-count{flex-shrink:0;margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;table-layout:fixed;min-width:1040px}th{text-align:left;color:var(--muted);font-size:10px;letter-spacing:.5px;font-weight:500;background:#171d20;border-bottom:1px solid var(--line);padding:0 10px;height:36px}th button{font:inherit;letter-spacing:inherit;color:inherit;border:0;background:none;padding:9px 0;width:100%;text-align:inherit;white-space:nowrap}th button:hover{color:var(--accent)}th[aria-sort=ascending],th[aria-sort=descending]{color:var(--accent)}td{padding:13px 10px;border-bottom:1px solid #293136;vertical-align:top}tr:last-child td{border-bottom:0}tbody tr:hover{background:#20282c}th:first-child,td:first-child{padding-left:16px}.name-col{width:26%}.level-col{width:54px}.stat-col{width:55px;text-align:right}.extra-col{width:19%}.mods-col{width:auto}.item-name{font-size:12px;line-height:1.5;font-weight:600;overflow-wrap:anywhere}.item-meta{display:flex;flex-wrap:wrap;gap:5px 10px;font-size:10px;color:var(--muted);margin-top:5px}.equipped{color:var(--accent)}.rarity-common{color:#e5e9e9}.rarity-uncommon{color:#8fdf35}.rarity-rare{color:#35a5ff}.rarity-epic{color:#bc67ff}.rarity-heroic{color:#ffd200}.rarity-regal{color:#ff3838}.rarity-legendary{color:#ff9117}.number{font-variant-numeric:tabular-nums;font-size:13px}.missing{color:#4e5b61}.extra-list,.mod-list{display:flex;flex-wrap:wrap;gap:5px}.extra-chip{color:#c7e4ad;background:#26322b;border:1px solid #35463a;border-radius:4px;padding:2px 6px;font-size:11px;white-space:nowrap}.mod-chip{color:#bdc8cc;background:#242e33;border-radius:4px;padding:2px 6px;font-size:10px;overflow-wrap:anywhere}.mod-set{color:var(--purple);background:#302b3b}.mod-ability{color:var(--blue);background:#22323e}.mod-gem_power{color:#cfc4a0}.unknown{color:#ebc587}.empty{text-align:center;padding:70px 20px;border:1px dashed #38454c;border-radius:9px;color:var(--muted)}.empty h2{color:var(--text);margin-bottom:10px}.error{color:#f3b3a9;background:#3a2525;border:1px solid #75443c;border-radius:6px;padding:12px;margin-bottom:15px}[hidden]{display:none!important}@media(min-width:1550px){.name-col{width:28%}.extra-col{width:18%}.stat-col{width:65px}}@media(max-width:1050px){.layout{grid-template-columns:170px minmax(0,1fr)}main{padding:25px 20px}.sidebar{padding:25px 8px}.heading{align-items:flex-start}.metrics{gap:16px}.metric strong{font-size:22px}}@media(max-width:700px){header{height:65px;padding:0 16px}.layout{display:block}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line);padding:12px 16px}.sidebar .eyebrow{display:none}#slots{display:flex;overflow:auto;gap:5px}.slot-button{width:auto;flex-shrink:0;gap:12px;padding:7px 10px}.heading{display:block}.metrics{margin-top:20px}main{padding:22px 16px}h1{font-size:27px}.search{flex-basis:100%}.toolbar select{flex:1;min-width:130px}.result-line{align-items:flex-start}.result-actions{flex-direction:column;align-items:flex-end;gap:6px}.group-name{font-size:12px}summary{padding:12px}.group-count{font-size:10px}}
+</style>
+</head>
+<body>
+<header><a class="brand" href="https://github.com/oleg-st/FsBank" target="_blank" rel="noopener noreferrer">Fs<span>Bank</span></a><div class="header-actions"><button class="button" id="import-button">Open JSON</button><input id="file-input" type="file" accept=".json,application/json" hidden></div></header>
+<div class="layout">
+<aside class="sidebar"><div class="eyebrow">Equipment slots</div><nav id="slots" aria-label="Slots"></nav></aside>
+<main>
+<div class="heading"><div><div class="eyebrow">Your collection</div><h1 id="page-title">All items</h1><p class="intro">Compare stats within the same slot and group.</p></div><div class="metrics"><div class="metric"><strong id="total-items">0</strong><span>items in export</span></div><div class="metric"><strong id="total-slots">0</strong><span>slots</span></div><div class="metric"><strong id="total-groups">0</strong><span>groups</span></div></div></div>
+<div id="error" class="error" role="alert" hidden></div>
+<div class="toolbar"><label class="search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></svg><input type="search" id="search" aria-label="Search items" placeholder="Name, set, ability, stat, or mod…"></label><select id="group-filter" aria-label="Group type"><option value="all">All groups</option><option value="set">Set items</option><option value="non-set">Non-set items</option></select><select id="location-filter" aria-label="Location"><option value="all">All locations</option><option value="equipped">Equipped</option><option value="bank">Bank</option><option value="inventory">Inventory</option></select></div>
+<div class="result-line"><span id="result-count" role="status" aria-live="polite"></span><div class="result-actions"><button class="text-button" id="reset">Reset filters</button><button class="text-button" id="collapse">Collapse groups</button></div></div>
+<div id="results"></div>
+</main></div>
+<script id="embedded-data" type="application/json">__ITEM_DATA__</script>
+<script>
+'use strict';
+const SLOT_ORDER = ['Head','Necklace','Shoulders','Back','Chest','Wrists','Hands','Legs','Feet','Ring','Weapon','Relic'];
+const STAT_ORDER = ['Strength','Intellect','Intelligence','Agility','Dexterity','Spirit','Haste','Expertise','Critical Strike'];
+const SHORT = {Strength:'Str',Intellect:'Int',Intelligence:'Int',Agility:'Agi',Dexterity:'Dex',Spirit:'Spirit',Haste:'Haste',Expertise:'Exp', 'Critical Strike':'Crit'};
+const LOCATION = {equipped:'Equipped',bank:'Bank',inventory:'Inventory'};
+// Name affixes from the supplied set reference; these also identify Uncommon items.
+const SET_RULES = [
+  {affix:"Redeemer's",name:'Dark Prophecy',slots:['Head','Necklace','Shoulders']},
+  {affix:"Witchslayer's",name:"Drakheim's Absolution",slots:['Chest','Necklace','Legs']},
+  {affix:"Vaultbinder's",name:"Torment of Bael'Aurum",slots:['Head','Necklace','Legs']},
+  {affix:"Wyrmguard's",name:'Draconic Might',slots:['Chest','Necklace','Shoulders']},
+  {affix:'Hungering',name:'Seal of the Heskyr',slots:['Back','Hands','Ring','Feet','Wrists']},
+  {affix:"Betrayer's",name:'Eldrin Deceit',slots:['Back','Hands','Ring','Feet','Wrists']},
+  {affix:'Baneful',name:'Sin Warding',slots:['Back','Hands','Ring','Feet','Wrists']},
+  {affix:'Fallen Order',name:'Tuzari Grace',slots:['Back','Hands','Ring','Feet','Wrists']},
+  {affix:'Withering',name:'Deaths Grasp',slots:['Back','Hands','Ring','Feet','Wrists']},
+];
+const RARITIES = ['common','uncommon','rare','epic','heroic','regal','legendary'];
+const collator = new Intl.Collator('en', {numeric:true,sensitivity:'base'});
+const $ = id => document.getElementById(id);
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const state = {slot:'all', query:'', group:'all', location:'all', sort:'name', direction:1, closed:new Set()};
+let items = [], slots = [], statTypes = [];
+function orderByList(a,b,list){const ai=list.indexOf(a),bi=list.indexOf(b);return (ai<0?999:ai)-(bi<0?999:bi)||collator.compare(a,b);}
+function normalizeName(name){return name.normalize('NFKC').replace(/[’‘]/g,"'").replace(/[‐‑–—]/g,'-').replace(/\s*-\s*/g,'-').replace(/\s+/g,' ').trim().toLowerCase();}
+function matchesAffix(name,affix){
+  const text=normalizeName(name),key=normalizeName(affix);
+  return [key,key+"'s"].some(part=>text===part||text.startsWith(part+' ')||text.startsWith(part+'-')||text.endsWith(' '+part)||text.endsWith('-'+part));
+}
+function setRule(item){return SET_RULES.find(rule=>rule.slots.includes(item.item_slot)&&matchesAffix(item.name,rule.affix));}
+function cleanSetName(name){return String(name??'').replace(/^[^\p{L}]*/u,'').trim();}
+function explicitSet(item){
+  const set = item.mods.find(mod => mod.type === 'set' && mod.set?.trim());
+  return set ? cleanSetName(set.set) : '';
+}
+function detectSet(item,exportSets){
+  const explicit=explicitSet(item);
+  if(explicit)return explicit;
+  const rule=setRule(item);
+  return rule ? exportSets.get(rule.affix)||rule.name : '';
+}
+function sumStats(stats){const result = new Map();for(const stat of stats)result.set(stat.type,(result.get(stat.type)||0)+stat.value);return result;}
+function describe(value){return value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);}
+function signed(value){return value>=0?'+'+value:String(value);}
+function modText(mod){
+  if(mod.type==='stat')return `${signed(mod.stat.value)} ${mod.stat.type}`;
+  if(mod.type==='set')return `Set: ${cleanSetName(mod.set)}`;
+  const label = {set:'Set',ability:'Ability',gem_power:'Gem',trait:'Trait',blessing:'Blessing'}[mod.type] || mod.type || 'Mod';
+  const name = mod[mod.type] ?? mod.text ?? Object.fromEntries(Object.entries(mod).filter(([key])=>!['type','value'].includes(key)));
+  return `${label}: ${describe(name)}`;
+}
+function locationText(item){const loc=item.location;return (LOCATION[loc.type]||loc.type||'Not specified')+(loc.tab!=null?` · tab ${loc.tab}`:'')+(loc.row!=null&&loc.column!=null?` · ${loc.row}:${loc.column}`:'');}
+function validateData(data){
+  if(!Array.isArray(data))throw new Error('Expected an array of items in items.json format.');
+  return data.map((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item))throw new Error(`Item ${index+1}: expected an object.`);
+    if(item.name!=null&&typeof item.name!=='string'||item.item_slot!=null&&typeof item.item_slot!=='string')throw new Error(`Item ${index+1}: name and slot must be strings.`);
+    const stats=item.stats??[],mods=item.mods??[];
+    if(!Array.isArray(stats)||!Array.isArray(mods))throw new Error(`Item ${index+1}: stats and mods must be arrays.`);
+    if(stats.some(s=>!s||typeof s.type!=='string'||typeof s.value!=='number'||!Number.isFinite(s.value)))throw new Error(`Item ${index+1}: invalid stat.`);
+    if(mods.some(m=>!m||typeof m.type!=='string'||(['set','ability'].includes(m.type)&&typeof m[m.type]!=='string')||(m.type==='stat'&&(!m.stat||typeof m.stat.type!=='string'||typeof m.stat.value!=='number'))))throw new Error(`Item ${index+1}: invalid mod.`);
+    const normalized={...item,name:item.name?.trim()||'Unnamed item',item_slot:item.item_slot?.trim()||'Unknown',stats,mods,location:item.location||{},index};
+    normalized.groupId=JSON.stringify([normalized.item_slot,item.name?.trim()?normalizeName(normalized.name):'unnamed:'+index]);
+    normalized.base=sumStats(stats.filter(s=>s.origin==='base'));
+    normalized.extra=sumStats(stats.filter(s=>s.origin==='dynamic'));
+    normalized.unresolved=stats.filter(s=>!['base','dynamic'].includes(s.origin));
+    normalized.search=[normalized.name,normalized.item_slot,...stats.map(s=>s.type),...mods.map(modText),locationText(normalized)].join(' ').toLocaleLowerCase();
+    return normalized;
+  });
+}
+function loadData(data){
+  const next=validateData(data);
+  // Prefer names found in JSON to the reference table, including for low rarities.
+  const candidates=new Map();
+  for(const item of next){
+    const rule=setRule(item),name=explicitSet(item);
+    if(!rule||!name)continue;
+    if(!candidates.has(rule.affix))candidates.set(rule.affix,new Map());
+    const counts=candidates.get(rule.affix);counts.set(name,(counts.get(name)||0)+1);
+  }
+  const exportSets=new Map([...candidates].map(([affix,counts])=>[affix,[...counts].sort((a,b)=>b[1]-a[1]||collator.compare(a[0],b[0]))[0][0]]));
+  // Use the full export so filters cannot change a group's set or its position.
+  const groupSets=new Map();
+  for(const item of next){const name=explicitSet(item);if(name&&!groupSets.has(item.groupId))groupSets.set(item.groupId,name);}
+  for(const item of next)if(!groupSets.has(item.groupId)){const name=detectSet(item,exportSets);if(name)groupSets.set(item.groupId,name);}
+  for(const item of next){item.setName=groupSets.get(item.groupId)||'';item.search+=' '+item.setName.toLocaleLowerCase();}
+  items=next;
+  slots=[...new Set(items.map(item=>item.item_slot))].sort((a,b)=>orderByList(a,b,SLOT_ORDER));
+  statTypes=[...new Set(items.flatMap(item=>[...item.base.keys()]))].filter(type=>!['armor','stamina'].includes(type.toLowerCase())).sort((a,b)=>orderByList(a,b,STAT_ORDER));
+  $('total-items').textContent=items.length;$('total-slots').textContent=slots.length;$('total-groups').textContent=new Set(items.map(item=>item.groupId)).size;
+  state.sort='name';state.direction=1;state.closed.clear();resetFilters();
+}
+function matches(item,includeSlot=true){return (!includeSlot||state.slot==='all'||item.item_slot===state.slot)&&(state.group==='all'||(state.group==='set'?Boolean(item.setName):!item.setName))&&(state.location==='all'||item.location.type===state.location)&&state.query.trim().toLocaleLowerCase().split(/\s+/).every(word=>item.search.includes(word));}
+function compareItems(a,b){
+  let av,bv;
+  if(state.sort==='name'){av=a.name;bv=b.name;}
+  else if(state.sort==='level'){av=a.item_level;bv=b.item_level;}
+  else{av=a.base.get(state.sort.slice(5));bv=b.base.get(state.sort.slice(5));}
+  if(av==null&&bv!=null)return 1;if(bv==null&&av!=null)return -1;
+  const diff=av==null&&bv==null?0:typeof av==='number'&&typeof bv==='number'?av-bv:collator.compare(String(av),String(bv));
+  return diff*state.direction||collator.compare(a.name,b.name)||a.index-b.index;
+}
+function renderSlots(){
+  const counts=new Map();for(const item of items.filter(item=>matches(item,false)))counts.set(item.item_slot,(counts.get(item.item_slot)||0)+1);
+  $('slots').innerHTML=[['all','All slots',[...counts.values()].reduce((a,b)=>a+b,0)],...slots.map(slot=>[slot,slot,counts.get(slot)||0])].map(([key,label,count])=>`<button class="slot-button ${state.slot===key?'active':''}" data-slot="${escapeHtml(key)}" aria-pressed="${state.slot===key}"><span>${escapeHtml(label)}</span><span class="slot-count">${count}</span></button>`).join('');
+}
+function sortHeader(label,key,className,title=label){const active=state.sort===key;return `<th class="${className}" scope="col" aria-sort="${active?(state.direction===1?'ascending':'descending'):'none'}"><button data-sort="${escapeHtml(key)}" title="${escapeHtml(title)}">${escapeHtml(label)}${active?(state.direction===1?' ↑':' ↓'):''}</button></th>`;}
+function rowHtml(item){
+  const extras=[...item.extra].map(([type,value])=>`<span class="extra-chip" title="${escapeHtml(item.stats.filter(s=>s.origin==='dynamic'&&s.type===type).map(s=>signed(s.value)+' '+s.type).join(' + '))}">${escapeHtml(signed(value)+' '+type)}</span>`).join('');
+  const unknown=item.unresolved.map(stat=>`<span class="extra-chip unknown" title="Stat origin is unknown">? ${escapeHtml(signed(stat.value)+' '+stat.type)}</span>`).join('');
+  const mods=item.mods.map(mod=>`<span class="mod-chip mod-${['set','ability','gem_power'].includes(mod.type)?mod.type:'generic'}">${escapeHtml(modText(mod))}</span>`).join('');
+  const rarity=String(item.rarity).trim().toLowerCase();
+  const rarityClass=RARITIES.includes(rarity)?'rarity-'+rarity:'';
+  return `<tr data-item-index="${item.index}"><td><div class="item-name ${rarityClass}">${escapeHtml(item.name)}</div><div class="item-meta"><span class="${item.location.type==='equipped'?'equipped':''}">${escapeHtml(locationText(item))}</span>${item.rarity?`<span class="${rarityClass}">${escapeHtml(item.rarity)}</span>`:''}</div></td><td class="number">${escapeHtml(item.item_level??'—')}</td>${statTypes.map(type=>`<td class="stat-col number ${item.base.has(type)?'':'missing'}">${item.base.has(type)?item.base.get(type):'—'}</td>`).join('')}<td><div class="extra-list">${extras+unknown||'<span class="missing">—</span>'}</div></td><td><div class="mod-list">${mods||'<span class="missing">—</span>'}</div></td></tr>`;
+}
+function render(){
+  renderSlots();$('page-title').textContent=state.slot==='all'?'All items':state.slot;
+  const visible=items.filter(item=>matches(item));
+  const groups=new Map();for(const item of visible){if(!groups.has(item.groupId))groups.set(item.groupId,{id:item.groupId,slot:item.item_slot,name:item.name,setName:item.setName,items:[]});groups.get(item.groupId).items.push(item);}
+  $('result-count').textContent=`Showing ${visible.length} of ${items.length} · groups: ${groups.size}`;
+  const headers=sortHeader('Name','name','name-col')+sortHeader('ilvl','level','level-col','Item level')+statTypes.map(type=>sortHeader(SHORT[type]||type,'stat:'+type,'stat-col',type+' · base')).join('')+'<th class="extra-col" scope="col">Extra</th><th class="mods-col" scope="col">Mods</th>';
+  $('results').innerHTML=slots.filter(slot=>visible.some(item=>item.item_slot===slot)).map(slot=>{
+    const slotGroups=[...groups.values()].filter(group=>group.slot===slot).sort((a,b)=>Number(Boolean(b.setName))-Number(Boolean(a.setName))||collator.compare(a.setName,b.setName)||collator.compare(a.name,b.name));
+    return `<section class="slot-section"><div class="slot-heading"><h2>${escapeHtml(slot)}</h2><span class="count-pill">${slotGroups.reduce((sum,group)=>sum+group.items.length,0)}</span></div>${slotGroups.map(group=>`<details class="group" data-group-id="${escapeHtml(group.id)}" ${state.closed.has(group.id)?'':'open'}><summary><span class="group-title" title="${escapeHtml(group.name+(group.setName?' (set: '+group.setName+')':''))}"><span class="group-name">${escapeHtml(group.name)}</span>${group.setName?` <span class="group-kind">(set: ${escapeHtml(group.setName)})</span>`:''}</span><span class="group-count">${group.items.length} ${group.items.length===1?'item':'items'}</span></summary><div class="table-wrap"><table aria-label="${escapeHtml(slot+' · '+group.name)}"><thead><tr>${headers}</tr></thead><tbody>${group.items.sort(compareItems).map(rowHtml).join('')}</tbody></table></div></details>`).join('')}</section>`;
+  }).join('')||`<div class="empty"><h2>${items.length?'No items found':'Empty export'}</h2><p>${items.length?'Try a different search or reset the filters.':'Open an item JSON file to get started.'}</p></div>`;
+  updateCollapseLabel();
+}
+function updateCollapseLabel(){const details=[...document.querySelectorAll('.group')];$('collapse').textContent=details.length&&details.every(group=>!group.open)?'Expand groups':'Collapse groups';$('collapse').disabled=!details.length;}
+function resetFilters(){Object.assign(state,{slot:'all',query:'',group:'all',location:'all'});$('search').value='';$('group-filter').value='all';$('location-filter').value='all';render();}
+$('search').addEventListener('input',event=>{state.query=event.target.value;render();});
+$('group-filter').addEventListener('change',event=>{state.group=event.target.value;render();});
+$('location-filter').addEventListener('change',event=>{state.location=event.target.value;render();});
+$('slots').addEventListener('click',event=>{const button=event.target.closest('[data-slot]');if(button){state.slot=button.dataset.slot;render();window.scrollTo({top:0,behavior:'smooth'});}});
+$('results').addEventListener('click',event=>{const button=event.target.closest('[data-sort]');if(button){const key=button.dataset.sort;state.direction=state.sort===key?-state.direction:key==='name'?1:-1;state.sort=key;render();}});
+$('results').addEventListener('toggle',event=>{if(!event.target.matches('.group')||!event.target.isConnected)return;const group=event.target;group.open?state.closed.delete(group.dataset.groupId):state.closed.add(group.dataset.groupId);updateCollapseLabel();},true);
+$('reset').addEventListener('click',resetFilters);
+$('collapse').addEventListener('click',()=>{const details=[...document.querySelectorAll('.group')];const open=details.every(group=>!group.open);for(const group of details){group.open=open;open?state.closed.delete(group.dataset.groupId):state.closed.add(group.dataset.groupId);}updateCollapseLabel();});
+$('import-button').addEventListener('click',()=>$('file-input').click());
+$('file-input').addEventListener('change',async event=>{const file=event.target.files[0];if(!file)return;try{const data=JSON.parse((await file.text()).replace(/^\uFEFF/,''));loadData(data);$('error').hidden=true;}catch(error){$('error').textContent='Could not open file: '+error.message;$('error').hidden=false;}finally{event.target.value='';}});
+try{loadData(JSON.parse($('embedded-data').textContent));}catch(error){$('error').textContent=error.message;$('error').hidden=false;}
+</script>
+</body>
+</html>
