@@ -24,6 +24,8 @@
 'use strict';
 const SLOT_ORDER = ['Head','Necklace','Shoulders','Back','Chest','Wrists','Hands','Legs','Feet','Ring','Weapon','Relic'];
 const STAT_ORDER = ['Strength','Intellect','Intelligence','Agility','Dexterity','Spirit','Haste','Expertise','Critical Strike'];
+const HIDDEN_BASE_STATS = new Set(['armor','stamina']);
+const UNSEARCHABLE_BASE_STATS = new Set([...HIDDEN_BASE_STATS,'intellect','strength','agility']);
 const SHORT = {Strength:'Str',Intellect:'Int',Intelligence:'Int',Agility:'Agi',Dexterity:'Dex',Spirit:'Spirit',Haste:'Haste',Expertise:'Exp', 'Critical Strike':'Crit'};
 const LOCATION = {equipped:'Equipped',bank:'Bank',inventory:'Inventory'};
 // Name affixes from the supplied set reference; these also identify Uncommon items.
@@ -87,7 +89,8 @@ function validateData(data){
     normalized.base=sumStats(stats.filter(s=>s.origin==='base'));
     normalized.extra=sumStats(stats.filter(s=>s.origin==='dynamic'));
     normalized.unresolved=stats.filter(s=>!['base','dynamic'].includes(s.origin));
-    normalized.search=[normalized.name,normalized.item_slot,...stats.map(s=>s.type),...mods.map(modText),locationText(normalized)].join(' ').toLocaleLowerCase();
+    const searchableStats=stats.filter(s=>s.origin!=='base'||!UNSEARCHABLE_BASE_STATS.has(s.type.toLowerCase()));
+    normalized.search=[normalized.name,normalized.item_slot,...searchableStats.map(s=>s.type),...mods.map(modText),locationText(normalized)].join(' ').toLocaleLowerCase();
     return normalized;
   });
 }
@@ -109,7 +112,7 @@ function loadData(data){
   for(const item of next){item.setName=groupSets.get(item.groupId)||'';item.search+=' '+item.setName.toLocaleLowerCase();}
   items=next;
   slots=[...new Set(items.map(item=>item.item_slot))].sort((a,b)=>orderByList(a,b,SLOT_ORDER));
-  statTypes=[...new Set(items.flatMap(item=>[...item.base.keys()]))].filter(type=>!['armor','stamina'].includes(type.toLowerCase())).sort((a,b)=>orderByList(a,b,STAT_ORDER));
+  statTypes=[...new Set(items.flatMap(item=>[...item.base.keys()]))].filter(type=>!HIDDEN_BASE_STATS.has(type.toLowerCase())).sort((a,b)=>orderByList(a,b,STAT_ORDER));
   $('total-items').textContent=items.length;$('total-slots').textContent=slots.length;$('total-groups').textContent=new Set(items.map(item=>item.groupId)).size;
   state.sort='name';state.direction=1;state.closed.clear();resetFilters();
 }
