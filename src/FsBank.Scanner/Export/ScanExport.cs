@@ -51,7 +51,7 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
             else
             {
                 using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(source, "full.json")));
-                CompactExport.Write(destination, report.RootElement.GetProperty("items").EnumerateArray(), source);
+                CompactExport.Write(destination, report.RootElement.GetProperty("items").EnumerateArray());
             }
             log("Export: " + destination);
         }

@@ -93,8 +93,7 @@ internal static class BatchCheck
             Require(items[0].GetProperty("location").GetProperty("type").GetString()=="equipped" && items[1].GetProperty("location").GetProperty("type").GetString()=="inventory","Character locations lost");
             Require(items[0].GetProperty("location").GetProperty("tab").ValueKind==JsonValueKind.Null,"Equipped item assigned bank tab");
             Require(items[8].GetProperty("location").GetProperty("tab").GetInt32()==7,"Last bank tab lost");
-            string html=File.ReadAllText(Path.Combine(all,"items.html"));
-            Require(html.Contains("equipped/r01_c01.png") && html.Contains("tab-07/r01_c01.png") && html.Contains("Test &lt;item&gt;") && !html.Contains("location_type"),"Compact HTML images, escaping or schema incorrect");
+            ScanExportCheck.CheckItemBrowser(all);
         }
         var pixels=Pixels.Load(Path.Combine(sampleSession,"baseline.png"));var bank=new Vision().FindBank(pixels) ?? throw new InvalidOperationException("Sample bank not found");
         Require(Vision.ActiveTab(pixels,bank)>=0,"Active sample tab not recognized");

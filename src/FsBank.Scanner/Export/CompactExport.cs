@@ -1,6 +1,4 @@
 using System.Text.Encodings.Web;
-using System.Net;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -25,7 +23,7 @@ internal static class CompactExport
         return Write(folder, rows.EnumerateArray());
     }
 
-    public static string Write(string folder, IEnumerable<JsonElement> rows, string? imageRoot = null)
+    public static string Write(string folder, IEnumerable<JsonElement> rows)
     {
         int? tab = null;
         string locationType = "bank";
@@ -39,24 +37,12 @@ internal static class CompactExport
                 tab = number;
         }
         var items = new JsonArray();
-        var cards=new StringBuilder();
-        foreach(var row in rows)
-        {
-            var item=Project(row,tab,locationType);
-            items.Add(item);
-            string file=Value(row,"file")?.GetValue<string>() ?? "";
-            cards.Append("<article><div class='pair'>");
-            if(imageRoot is not null && file.Length>0)
-            {
-                string image=Path.Combine(imageRoot,file.Replace('/',Path.DirectorySeparatorChar));
-                if(File.Exists(image))cards.Append("<img src='data:image/png;base64,").Append(System.Convert.ToBase64String(File.ReadAllBytes(image))).Append("' alt='Item tooltip'>");
-            }
-            else if(file.Length>0)cards.Append("<img src='").Append(WebUtility.HtmlEncode(string.Join("/",file.Replace('\\','/').Split('/').Select(Uri.EscapeDataString)))).Append("' alt='Item tooltip'>");
-            cards.Append("<pre>").Append(WebUtility.HtmlEncode(item.ToJsonString(Options))).Append("</pre></div></article>");
-        }
-        File.WriteAllText(Path.Combine(folder,"items.html"),"<!doctype html><html lang='en'><meta charset='utf-8'><title>FsBank items</title><style>body{background:#141c25;color:#eee;font:15px system-ui;margin:24px}a{color:#8bd0ff}article{border-top:1px solid #789;padding:20px 0}.pair{display:flex;gap:20px}img{max-width:45%;object-fit:contain;align-self:start}pre{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}@media(max-width:700px){.pair{display:block}img{max-width:100%}}</style><h1>Items</h1><p><a href='items.json'>items.json</a>"+(imageRoot is null ? " | <a href='report.html'>Full report</a>" : "")+"</p><p>"+items.Count+" items. Results require visual review.</p>"+cards+"</html>");
+        foreach (var row in rows)
+            items.Add(Project(row, tab, locationType));
+        string json = items.ToJsonString(Options);
         string output = Path.Combine(folder, "items.json");
-        File.WriteAllText(output, items.ToJsonString(Options));
+        File.WriteAllText(output, json);
+        ItemBrowserHtml.Write(Path.Combine(folder, "items.html"), json);
         return output;
     }
 

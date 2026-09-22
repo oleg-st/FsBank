@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-TEMPLATE = Path(__file__).with_name("item-browser.template.html")
+TEMPLATE = ROOT / "src" / "FsBank.Scanner" / "Export" / "item-browser.template.html"
 
 
 def generate(source: Path, destination: Path) -> int:

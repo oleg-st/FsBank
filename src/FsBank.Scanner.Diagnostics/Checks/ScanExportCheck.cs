@@ -4,6 +4,7 @@ using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning.Batch;
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace FsBank.Scanner.Diagnostics.Checks;
 
@@ -12,6 +13,7 @@ internal static class ScanExportCheck
     public static void Run(string root)
     {
         CheckStatOrigins();
+        CheckBrowserEscaping(root);
         foreach (bool debug in new[] { false, true })
         foreach (bool partial in new[] { false, true })
         {
@@ -35,6 +37,7 @@ internal static class ScanExportCheck
             int count = Directory.GetDirectories(result).Length;
             if (count != (debug ? partial ? 1 : 9 : 0)) throw new Exception("Unexpected batch folders");
             if (!debug && Directory.GetFiles(result).Length != 2) throw new Exception("Unexpected compact batch files");
+            CheckItemBrowser(result);
         }
         foreach (bool debug in new[] { false, true })
         foreach (string location in new[] { "equipped", "inventory", "bank", "unknown" })
@@ -57,13 +60,47 @@ internal static class ScanExportCheck
             var files = Directory.GetFiles(result).Select(Path.GetFileName).Order().ToArray();
             string[] expectedFiles = debug ? ["batch.json", "full.json", "items.html", "items.json", "report.html"] : ["items.html", "items.json"];
             if (!files.SequenceEqual(expectedFiles)) throw new Exception("Unexpected export files");
-            string html = File.ReadAllText(Path.Combine(result, "items.html"));
-            if (!debug && (!html.Contains("data:image/png;base64,AQID") || html.Contains("href='report.html'")))
-                throw new Exception("Compact HTML is not self-contained");
+            CheckItemBrowser(result);
             using var items = JsonDocument.Parse(File.ReadAllText(Path.Combine(result, "items.json")));
             if (items.RootElement[0].GetProperty("location").GetProperty("type").GetString() != (location == "unknown" ? "bank" : location))
                 throw new Exception("Incorrect location");
         }
+    }
+
+    internal static void CheckItemBrowser(string folder)
+    {
+        string html = File.ReadAllText(Path.Combine(folder, "items.html"));
+        var match = Regex.Match(html, """<script id="embedded-data" type="application/json">(.*?)</script>""", RegexOptions.Singleline);
+        if (!match.Success || Regex.IsMatch(html, """<(?:script|link|img)\b[^>]*(?:src|href)\s*=""", RegexOptions.IgnoreCase))
+            throw new Exception("Item browser must embed its data, scripts and styles");
+        using var embedded = JsonDocument.Parse(match.Groups[1].Value);
+        using var items = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "items.json")));
+        if (!JsonElement.DeepEquals(embedded.RootElement, items.RootElement))
+            throw new Exception("Item browser data differs from items.json");
+        if (!html.Contains("id=\"search\"") || !html.Contains("id=\"results\"") || !html.Contains("function render()"))
+            throw new Exception("Item browser interface is missing");
+    }
+
+    private static void CheckBrowserEscaping(string root)
+    {
+        string folder = Path.Combine(root, "browser-escaping");
+        Directory.CreateDirectory(folder);
+        var row = JsonSerializer.SerializeToElement(new
+        {
+            file = "r01_c01.png",
+            item = new
+            {
+                Name = "</script><script>alert('test')</script> & \"quoted\" Élan __ITEM_DATA__",
+                Slot = "Head", Rarity = "Uncommon",
+                Stats = new[] { new { Name = "Strength", Value = 10, Origin = "base" } },
+                Modifiers = new[] { new { Kind = "ability", Name = "<Ability> & test" } }
+            }
+        });
+        CompactExport.Write(folder, [row]);
+        CheckItemBrowser(folder);
+        string html = File.ReadAllText(Path.Combine(folder, "items.html"));
+        if (html.Contains("</script><script>alert") || html.Contains("<Ability>"))
+            throw new Exception("Item text can escape the embedded JSON script");
     }
 
     private static void CheckStatOrigins()
