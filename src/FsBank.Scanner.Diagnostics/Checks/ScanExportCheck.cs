@@ -13,6 +13,7 @@ internal static class ScanExportCheck
     public static void Run(string root)
     {
         CheckStatOrigins();
+        CheckWrappedTitles();
         CheckBrowserEscaping(root);
         foreach (bool debug in new[] { false, true })
         foreach (bool partial in new[] { false, true })
@@ -101,6 +102,30 @@ internal static class ScanExportCheck
         string html = File.ReadAllText(Path.Combine(folder, "items.html"));
         if (html.Contains("</script><script>alert") || html.Contains("<Ability>"))
             throw new Exception("Item text can escape the embedded JSON script");
+    }
+
+    private static void CheckWrappedTitles()
+    {
+        RecognizedLine Line(int index, string text) =>
+            new(index, new Rectangle(0, index * 16, 200, 14), "mixed", text, 99);
+        foreach (var (first, second, expected) in new[]
+        {
+            ("BETRAYER'S BLOOD-", "QUARTZ RING", "BETRAYER'S BLOOD-QUARTZ RING"),
+            ("REDEEMER'S THORN-", "CRESTED MASK", "REDEEMER'S THORN-CRESTED MASK"),
+            ("WITCHSLAYER'S BONE-", "CARVED TORC", "WITCHSLAYER'S BONE-CARVED TORC"),
+            ("GRIMOIRE OF", "RESURRECTION", "GRIMOIRE OF RESURRECTION"),
+            ("VAULTBINDER'S LEGGINGS", "OF THE FLEET", "VAULTBINDER'S LEGGINGS OF THE FLEET"),
+            ("SOUL-CURSED", "SIGNET", "SOUL-CURSED SIGNET"),
+            ("BETRAYER’'S BLOOD-", "QUARTZ RING", "BETRAYER'S BLOOD-QUARTZ RING")
+        })
+        {
+            var parsed = TooltipParser.Parse([Line(0, first), Line(1, second)]);
+            if (parsed.Name != expected) throw new Exception($"Incorrect wrapped title: {parsed.Name}");
+        }
+        var ornament = new RecognizedLine(1, new Rectangle(64,36,157,7), "mixed", "SS", 0);
+        var decorated = TooltipParser.Parse([Line(0,"BANDS OF THE FIRST DRYAD"),ornament]);
+        if (decorated.Name != "BANDS OF THE FIRST DRYAD" || !decorated.MetadataLines.Contains("SS"))
+            throw new Exception("Title ornament was included in the name or its evidence was lost");
     }
 
     private static void CheckStatOrigins()

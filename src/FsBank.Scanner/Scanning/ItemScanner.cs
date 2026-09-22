@@ -406,13 +406,13 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                     candidate=crop;located=found;
                     if(stable+1<StableFrameCount)continue;
                     Check();
-                    if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale))
+                    if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale) || !TooltipSegmenter.HasReadableLayout(crop))
                     {
                         incompleteHeader=true;
                         frame.Save(Path.Combine(session,$"r{cell.Row+1:00}_c{cell.Col+1:00}-header-attempt-{headerRetries+1}.png"));
                         if(headerRetries>=2)break;
                         headerRetries++;
-                        log($"{cell.Row+1}:{cell.Col+1}: header cropped or unconfirmed; retry {headerRetries}/2.");
+                        log($"{cell.Row+1}:{cell.Col+1}: header cropped or text layout incomplete; retry {headerRetries}/2.");
                         Move(layout.Park);
                         if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
                         var clearRetry=Stopwatch.StartNew();
@@ -446,7 +446,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                     lastTooltipFrame?.Save(Path.Combine(session,diagnostic));
                     timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
                     results.Add(new(cell.Row+1,cell.Col+1,incompleteHeader ? "incomplete_tooltip" : "no_stable_tooltip",null,located?.Bounds,watch.Elapsed.TotalMilliseconds,timing));
-                    log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "full header not confirmed" : "stable tooltip not found")} (total {timing.TotalMs:F0} ms; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; full searches {timing.FullSearchCalls}); diagnostic: {diagnostic}.");
+                    log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "complete tooltip not confirmed" : "stable tooltip not found")} (total {timing.TotalMs:F0} ms; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; full searches {timing.FullSearchCalls}); diagnostic: {diagnostic}.");
                     // Clear any late tooltip, including one that did not reach stability.
                     Move(layout.Park);Thread.Sleep(FailedTooltipParkMs);var f=Read();
                     previous=vision.FindTooltip(f,layout.Scale);

@@ -9,6 +9,25 @@ namespace FsBank.Scanner.Diagnostics.Checks;
 
 internal static class QualityCheck
 {
+    public static void InspectCaptureLayout(string batch,string output)
+    {
+        Directory.CreateDirectory(output);
+        var rejected=new List<string>();var unreadable=new List<string>();int count=0;
+        foreach(var directory in Directory.GetDirectories(batch))
+        foreach(var file in Directory.GetFiles(directory,"r??_c??.png"))
+        {
+            count++;
+            var pixels=Pixels.Load(file);
+            if(!TooltipSegmenter.HasCompleteTitle(pixels))
+                rejected.Add(Path.GetRelativePath(batch,file).Replace('\\','/'));
+            if(!TooltipSegmenter.HasReadableLayout(pixels))
+                unreadable.Add(Path.GetRelativePath(batch,file).Replace('\\','/'));
+        }
+        var json=JsonSerializer.Serialize(new {Count=count,Rejected=rejected,Unreadable=unreadable},new JsonSerializerOptions{WriteIndented=true});
+        File.WriteAllText(Path.Combine(output,"capture-layout.json"),json);
+        Console.WriteLine(json);
+    }
+
     public static void Headers(string batch,string output)
     {
         Directory.CreateDirectory(output);var vision=new Vision();var results=new List<object>();

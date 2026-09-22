@@ -65,6 +65,8 @@ internal static class ItemRecognition
         var item = TooltipParser.Parse(lines);
         bool captureHeaderComplete=TooltipSegmenter.HasCompleteTitle(pixels);
         if(!captureHeaderComplete)item.Warnings.Add("Incomplete capture header; rescan required");
+        bool captureLayoutComplete=TooltipSegmenter.HasReadableLayout(pixels);
+        if(!captureLayoutComplete)item.Warnings.Add("Incomplete capture text layout; rescan required");
         string name = Path.GetFileNameWithoutExtension(file);
         using (var annotated = pixels.Bitmap())
         {
@@ -74,7 +76,7 @@ internal static class ItemRecognition
             annotated.Save(Path.Combine(output, name + "-lines.png"));
         }
         var data = new { file = Path.GetFileName(file), sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))),
-            status = captureHeaderComplete ? "needs_visual_review" : "rescan_required", captureHeaderComplete, lines, item };
+            status = captureHeaderComplete && captureLayoutComplete ? "needs_visual_review" : "rescan_required", captureHeaderComplete, captureLayoutComplete, lines, item };
         cards.Append($"<article><h2>{name}</h2><div class='pair'><img src='{name}-lines.png' alt='Detected lines'><img src='data:image/png;base64,{Convert.ToBase64String(File.ReadAllBytes(file))}' alt='Source'></div><pre>{WebUtility.HtmlEncode(JsonSerializer.Serialize(item, JsonOptions))}</pre><table><tr><th>Line</th><th>Color</th><th>Confidence</th><th>Raw text</th></tr>");
         foreach (var line in lines) cards.Append($"<tr><td>{line.Index}</td><td>{line.Color}</td><td>{line.Confidence}</td><td>{WebUtility.HtmlEncode(line.Text)}"
             + (line.Corrections.Count > 0 ? $"<details><summary>OCR corrections: {line.Corrections.Count}</summary>Raw OCR: {WebUtility.HtmlEncode(line.RawText)}<br>{WebUtility.HtmlEncode(JsonSerializer.Serialize(line.Corrections))}</details>" : "") + "</td></tr>");

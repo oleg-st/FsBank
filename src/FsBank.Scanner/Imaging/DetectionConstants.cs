@@ -26,7 +26,7 @@ internal static class DetectionConstants
     public const int EdgeContrast = 23;
     public const int HeaderBrightness = 90;
     public const int RecoveryHeaderBrightness = 60;
-    public const double HeaderMinimumSaturation = .60;
+    public const double HeaderMinimumSaturation = .50;
     public const int HeaderContrast = 45;
     public const double HeaderColoredFraction = .20;
     public const int ColoredEdgeBrightness = 75;

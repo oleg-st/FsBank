@@ -11,6 +11,25 @@ internal static class TooltipSegmenter
     internal static bool HasCompleteTitle(Pixels pixels, double scale=1)
     {
         var header=pixels.Crop(new Rectangle(0,0,pixels.Width,Math.Min(pixels.Height,(int)Math.Ceiling(85*scale))));
+        // The first surviving line can be equipment metadata or the second title
+        // line. Require evidence of the top outline before accepting either.
+        bool topOutline=false;
+        for(int y=0;y<Math.Min(header.Height,(int)Math.Ceiling(9*scale));y++)
+        {
+            int colored=0;
+            for(int x=14;x<header.Width-14;x++)
+            {
+                int i=header.Offset(x,y),max=Math.Max(header.Data[i],Math.Max(header.Data[i+1],header.Data[i+2]));
+                int min=Math.Min(header.Data[i],Math.Min(header.Data[i+1],header.Data[i+2]));
+                if(max>70 && max-min>45)colored++;
+            }
+            if(colored>(header.Width-28)*.1){topOutline=true;break;}
+        }
+        if(!topOutline)return false;
+        var upperBand=Find(header,startY:0).FirstOrDefault(b=>b.Box.Height>=11*scale && b.Box.Width>=40*scale);
+        if(upperBand is not null && upperBand.Box.Top<5*scale && upperBand.Box.Width<=header.Width*.85)return false;
+        // Keep ornament/background pixels above the text margin out of the
+        // title bands; they can otherwise merge with a complete first line.
         var bands=Find(header);
         foreach(var band in bands)
         {
@@ -19,8 +38,12 @@ internal static class TooltipSegmenter
         }
         return false;
     }
+    // Detailed item tooltips need separate heading, metadata, stat and footer
+    // lines. Fewer than ten bands is a conservative rejection of a collapsed
+    // layout, not proof that a layout with more bands is correct.
+    internal static bool HasReadableLayout(Pixels pixels) => Find(pixels).Count>=10;
     // Current capture profile: discard the ornamental border, not the text margin.
-    public static List<TextBand> Find(Pixels pixels)
+    public static List<TextBand> Find(Pixels pixels, int startY=10)
     {
         List<TextBand> result = [];
         int left = 14, right = pixels.Width - 14;
@@ -36,7 +59,7 @@ internal static class TooltipSegmenter
             return count >= 3 && longest < (right - left) * .7;
         }
         int start = -1, last = -1;
-        for (int y = 10; y <= pixels.Height - 8; y++)
+        for (int y = startY; y <= pixels.Height - 8; y++)
         {
             bool ink = y < pixels.Height - 8 && Row(y);
             if (ink) { if (start < 0) start = y; last = y; }

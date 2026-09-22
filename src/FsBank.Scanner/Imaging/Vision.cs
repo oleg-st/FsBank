@@ -249,7 +249,7 @@ internal sealed class Vision
             // Recover from interrupted side edges without changing already valid crops.
             // Saturation rejects sky/background; a shorter run admits the ornate red border.
             int? lowerBorder=null;
-            for(int y=baseY;y>=0;y--)
+            for(int y=baseY;y>=Math.Max(0,rect.Top-(int)Math.Ceiling(85*scale));y--)
             {
                 int count=0,run=0,longest=0;
                 for(int x=left+HeaderHorizontalInsetPx;x<right-HeaderHorizontalInsetPx;x++)
@@ -263,8 +263,10 @@ internal sealed class Vision
                 if(lowerBorder is null){lowerBorder=y;continue;}
                 if(lowerBorder.Value-y<=HeaderMinHeightPx*scale)continue;
                 var recovered=Rectangle.FromLTRB(rect.Left,Math.Max(0,y-(int)Math.Ceiling(CropTopPaddingPx*scale)),rect.Right,rect.Bottom);
-                if(TooltipSegmenter.HasCompleteTitle(frame.Crop(recovered),scale))rect=recovered;
-                break;
+                if(TooltipSegmenter.HasCompleteTitle(frame.Crop(recovered),scale))
+                {rect=recovered;break;}
+                // A title's glyphs can resemble a horizontal border. Keep
+                // looking upward when this candidate still clips the title.
             }
         }
         return new(rect,footerRect);

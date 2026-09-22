@@ -10,6 +10,7 @@ internal static class TooltipParser
     {
         var result = new ParsedTooltip();
         bool stats = false, footer = false;
+        int nameLineHeight = 0;
         ModifierBlock? block = null;
         foreach (var line in lines)
         {
@@ -72,7 +73,17 @@ internal static class TooltipParser
                 else if (text is "Cloth" or "Leather" or "Mail" or "Plate") result.Material = text;
                 else if (text == "Unique Equipped" || text.StartsWith("Unique Equipped:")) result.UniqueEquipped = true;
                 else if (Regex.IsMatch(text, @"^[A-Z][A-Z '\-’]+$") && !text.Contains("ITEM"))
-                    result.Name = result.Name is null ? text : result.Name + " " + text;
+                {
+                    // The ornamental separator can OCR as uppercase letters,
+                    // but is shorter than the title font. Keep it as evidence.
+                    if (nameLineHeight > 0 && line.Box.Height < nameLineHeight * .75)
+                    { result.MetadataLines.Add(text); continue; }
+                    nameLineHeight = Math.Max(nameLineHeight, line.Box.Height);
+                    // OCR can split one possessive apostrophe into curly + straight.
+                    text = Regex.Replace(text, @"(?<=[A-Z])'{2,}(?=S\b)", "'");
+                    // A title wrapped after a hyphen continues the same compound word.
+                    result.Name = result.Name is null ? text : result.Name + (result.Name.EndsWith('-') ? "" : " ") + text;
+                }
                 else result.MetadataLines.Add(text);
             }
             else if (text is "The item's potential power; derived from its" or "Item Level, Rarity, and the Modifiers it has.")

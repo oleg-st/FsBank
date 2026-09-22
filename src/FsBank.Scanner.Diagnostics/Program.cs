@@ -17,6 +17,8 @@ internal static class Program
             Console.WriteLine("""
                 FsBank.Scanner.Diagnostics commands:
                   --verify-export <output>
+                  --inspect-capture-layout <batch> <output>
+                  --verify-capture-recovery <20260922-205823-892-all> <output>
                   --verify-character-panel <image> <output>
                   --verify-tooltip-edge <crop> <output.json>
                   --verify-manual-startup <image> <output>
@@ -38,6 +40,18 @@ internal static class Program
         if(args.Length==2 && args[0]=="--verify-export")
         {
             try { ScanExportCheck.Run(Path.GetFullPath(args[1])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--inspect-capture-layout")
+        {
+            try { QualityCheck.InspectCaptureLayout(args[1],args[2]); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-capture-recovery")
+        {
+            try { CaptureRecoveryCheck.Run(args[1],args[2]); }
             catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
