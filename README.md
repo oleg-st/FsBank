@@ -7,7 +7,7 @@ A Windows application for scanning items in **Fellowship** and exporting their d
 - Capture item information from the game screen.
 - Recognize item text with Tesseract OCR.
 - Export scanned items in JSON format.
-- Browse each export in a standalone `items.html` with search, filters, sorting,
+- Browse each export in a standalone [`items.html`](https://oleg-st.github.io/FsBank/item-browser.html) with search, filters, sorting,
   and item groups by slot and name. The page embeds the same data as `items.json`.
 
 ## Download
