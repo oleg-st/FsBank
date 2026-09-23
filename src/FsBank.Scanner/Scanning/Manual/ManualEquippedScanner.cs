@@ -12,17 +12,19 @@ using static FsBank.Scanner.Imaging.DetectionConstants;
 
 namespace FsBank.Scanner.Scanning.Manual;
 
-internal sealed class ManualEquippedScanner(Action<string> log)
+internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTracker? progress = null)
 {
     public void Run(string root,CancellationToken token,Action<Rectangle,ScanLayout,(int,int)[],(int,int)[]> update,Action<string>? showStatus=null)
     {
-        nint game=Native.FindGame();
+        progress?.Waiting(ScanTarget.Equipped,"Switch to Fellowship yourself and open the character panel.");
+        nint game=progress is null ? Native.FindGame() : ScanPreparation.GetGame(ScanTarget.Equipped,false,progress,token);
         if(game==0)throw new InvalidOperationException("Game window not found.");
         void Wait() { if(token.WaitHandle.WaitOne(15))token.ThrowIfCancellationRequested(); }
         log("Manual: switch to the game, open the character panel and move off items. Hold Left Alt yourself when hovering. Esc stops.");
         while(Native.GetForegroundWindow()!=game){token.ThrowIfCancellationRequested();Wait();}
         var preparation=Stopwatch.StartNew();
         var client=Native.ClientBounds(game);
+        progress?.SetBounds(client);
         void Check()
         {
             token.ThrowIfCancellationRequested();
@@ -53,7 +55,8 @@ internal sealed class ManualEquippedScanner(Action<string> log)
             long stage=Stopwatch.GetTimestamp();
             if(layout is null || !vision.PanelStillOpen(baseline,layout))layout=panelSearch.Find(baseline);
             layoutMs+=Stopwatch.GetElapsedTime(stage).TotalMilliseconds;
-            if(layout is null){clearFrames=0;continue;}
+            if(layout is null){clearFrames=0;progress?.Waiting(ScanTarget.Equipped,"Open the character panel to scan equipped items.");continue;}
+            progress?.Scanning(ScanTarget.Equipped,"Move the mouse off all items briefly to prepare the scan.");
             stage=Stopwatch.GetTimestamp();
             // The tooltip follows the cursor. Wait off all character slots and
             // check its placement corridor instead of scanning the entire desktop.
@@ -66,7 +69,7 @@ internal sealed class ManualEquippedScanner(Action<string> log)
             clearFrames=clear ? clearFrames+1 : 0;
             if(clearFrames>=2)break;
         }
-        string session=Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+"-equipped-manual");
+        string session=Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
         Directory.CreateDirectory(session);
         // DXGI pixels are borrowed. Detach before writing on the background worker.
         var baselineCopy=baseline.Crop(baseline.Bounds);
@@ -74,7 +77,9 @@ internal sealed class ManualEquippedScanner(Action<string> log)
         var pending=layout.Slots().Where(s=>Vision.Occupied(baseline,s.Bounds)).Select(s=>(s.Row,s.Col)).ToHashSet();
         var done=new HashSet<(int,int)>();
         var captured=new HashSet<(int,int)>();
-        var pipeline=new OcrPipeline(log);
+        progress?.RegisterSession(session,ScanTarget.Equipped,null);
+        var pipeline=new OcrPipeline(log,onQueued:progress is null ? null : progress.Queued,
+            onRecognized:progress is null ? null : progress.Recognized);
         pipeline.Register(session);
         var search=new ManualTooltipSearch(vision,layout.Scale);
         var timings=new List<object>();
@@ -87,7 +92,12 @@ internal sealed class ManualEquippedScanner(Action<string> log)
         void Waiting(string reason,string message,Pixels? frame=null)
         {
             waits[reason]=waits.GetValueOrDefault(reason)+1;
-            if(lastReason!=reason){log("Manual: "+message);showStatus?.Invoke(message);lastReason=reason;reasonTime.Restart();}
+            if(lastReason!=reason)
+            {
+                log("Manual: "+message);showStatus?.Invoke(message);lastReason=reason;reasonTime.Restart();
+                if(reason=="panel_unconfirmed")progress?.Waiting(ScanTarget.Equipped,message);
+                else progress?.Scanning(ScanTarget.Equipped,message);
+            }
             if(frame is not null && reasonTime.ElapsedMilliseconds>=2000 && diagnostics.Add(reason))
                 frame.Save(Path.Combine(session,"waiting-"+reason+".png"));
         }
@@ -103,6 +113,7 @@ internal sealed class ManualEquippedScanner(Action<string> log)
         },new JsonSerializerOptions{WriteIndented=true}));
         try
         {
+            progress?.Scanning(ScanTarget.Equipped,"Hold Left Alt yourself and hover a highlighted equipped item.");
             Save();update(client,layout,pending.ToArray(),done.ToArray());
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Manual ready in {readyMs:F0} ms after game focus: setup {setupMs:F0}, panel search {layoutMs:F0}, clear check {clearMs:F0} ms; baseline PNG saves in background.");
@@ -143,15 +154,15 @@ internal sealed class ManualEquippedScanner(Action<string> log)
                 if(waitingForPanel)
                 {
                     waitingForPanel=false;candidate=null;candidateBounds=null;stable=0;hover.Restart();
-                    Waiting("panel_restored","Panel visible again. Continue hovering red slots.");
+                    Waiting("panel_restored","Panel visible again. Continue hovering blue slots.");
                 }
                 bool altDown=(Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)!=0;
                 if(!altDown || !altWasDown)altHold.Restart();
                 altWasDown=altDown;
                 gate.Observe(slot,cursor,tooltip?.Bounds,new Size(frame.Width,frame.Height),layout.Scale);
                 string? waitReason=null;string waitMessage="";
-                if(slot is null){waitReason="hover_item";waitMessage="Hover a red slot while holding Left Alt.";}
-                else if(!pending.Contains(slot.Value)){waitReason="already_done";waitMessage="Saved! Hover another red slot. OCR runs in background.";}
+                if(slot is null){waitReason="hover_item";waitMessage="Hover a blue slot while holding Left Alt.";}
+                else if(!pending.Contains(slot.Value)){waitReason="already_done";waitMessage="Saved! Hover another blue slot. OCR runs in background.";}
                 else if(!altDown){waitReason="hold_alt";waitMessage="Hold LEFT ALT yourself to capture the detailed tooltip.";}
                 else if(tooltip is null){waitReason="no_tooltip";waitMessage="Waiting for a detectable tooltip. Keep hovering.";}
                 else if(!gate.MatchesCursor || !vision.TooltipNearCursor(frame,layout.Scale,cursor,tooltip))
@@ -190,12 +201,14 @@ internal sealed class ManualEquippedScanner(Action<string> log)
                 candidate=null;stable=0;
             }
             status="completed";
+            progress?.CaptureComplete(ScanTarget.Equipped);
         }
         catch(OperationCanceledException e){status="cancelled";error=e.Message;throw;}
         catch(Exception e){status="failed";error=e.Message;throw;}
         finally
         {
             Save();
+            progress?.Finishing();
             try { pipeline.Complete(); }
             catch(Exception e)
             {
@@ -211,4 +224,3 @@ internal sealed class ManualEquippedScanner(Action<string> log)
         }
     }
 }
-

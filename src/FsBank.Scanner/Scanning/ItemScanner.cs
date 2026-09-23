@@ -16,8 +16,9 @@ using System.Threading.Channels;
 
 namespace FsBank.Scanner.Scanning;
 
-internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
+internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, ScanProgressTracker? progress = null)
 {
+    private sealed class MouseMovedException : Exception { }
     // One capture device per batch; disposed even when a tab fails or is cancelled.
     private sealed class CaptureContext : IDisposable
     {
@@ -100,15 +101,29 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         using var context=new CaptureContext();
         RunCore(root,hoverMs,token,null,null,context,target);
     }
-    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank,bool restoreCursor=true)
+    public void RunSelected(string root,int hoverMs,CancellationToken token,ScanOptions options)
+    {
+        using var context=new CaptureContext();
+        bool first=true;
+        ScanTarget? previous=null;
+        BatchScan.RunSelection(root,options,(step,folder)=>
+        {
+            var target=step.LocationType switch { "equipped"=>ScanTarget.Equipped,"inventory"=>ScanTarget.Inventory,_=>ScanTarget.Bank };
+            RunCore(root,hoverMs,token,target==ScanTarget.Bank && step.Tab>0 ? step.Tab-1 : null,folder,context,target,
+                restoreCursor:false,allowActivate:first,countdown:first||previous!=target);
+            if(target!=ScanTarget.Bank || !options.AllBankTabs || step.Tab==TabCount)progress?.CaptureComplete(target);
+            first=false;previous=target;
+        },log,token);
+    }
+    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank,bool restoreCursor=true,bool allowActivate=true,bool countdown=false)
     {
         var preparation=Stopwatch.StartNew();
         if(target!=ScanTarget.Bank && targetTab is not null)throw new ArgumentException("Only bank scans have tabs.");
         if(targetTab is <0 or >=TabCount)throw new ArgumentOutOfRangeException(nameof(targetTab));
-        nint hwnd=Native.FindGame();
+        nint hwnd=progress is null ? Native.FindGame() : ScanPreparation.GetGame(target,allowActivate,progress,token);
         if(hwnd==0)throw new InvalidOperationException("No visible fellowship-Win64-Shipping.exe window found.");
         bool needsActivation=Native.GetForegroundWindow()!=hwnd;
-        if(needsActivation)Native.Activate(hwnd);
+        if(needsActivation && allowActivate)Native.Activate(hwnd);
         var activate=Stopwatch.StartNew();
         while(Native.GetForegroundWindow()!=hwnd && activate.ElapsedMilliseconds<ActivationTimeoutMs){token.ThrowIfCancellationRequested();Thread.Sleep(ActivationPollMs);}
         if(Native.GetForegroundWindow()!=hwnd)throw new InvalidOperationException("Windows could not activate the game. Make sure the game window is accessible, then click a scan button to try again.");
@@ -125,7 +140,12 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         double initialFrameMs=stage.Elapsed.TotalMilliseconds;
         stage.Restart();
         var fullLayout=vision.FindLayout(initial,target);
-        while(fullLayout is null && !restoreCursor && stage.ElapsedMilliseconds<TooltipClearTimeoutMs)
+        if(progress is not null)
+        {
+            fullLayout=ScanPreparation.WaitForPanel(hwnd,client,target,vision,()=>Next(capture,client,token,Stopwatch.GetTimestamp()),progress,token,countdown);
+            context.ExpectedCursor=null;
+        }
+        while(progress is null && fullLayout is null && !restoreCursor && stage.ElapsedMilliseconds<TooltipClearTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
             if(Native.GetForegroundWindow()!=hwnd || Native.ClientBounds(hwnd)!=client ||
@@ -153,8 +173,50 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
         int? CurrentTab(Pixels frame) => layout is BankLayout bank ? Vision.ActiveTab(frame,bank) : null;
         Native.GetCursorPos(out var originalCursor);
         bool altPressed=false, altReleased=false;
+        bool capturingItem=false;
         Point? expectedCursor=null;
         long lastInput=0;
+        void HoldAlt()
+        {
+            if((Native.GetAsyncKeyState((int)Keys.Menu)&Native.KeyDownMask)!=0)
+                throw new InvalidOperationException("Release Alt before starting capture.");
+            if(!Native.SetLeftAlt(true))throw new InvalidOperationException("Failed to press Left Alt via SendInput. Check the privilege levels of the app and game.");
+            altPressed=true;altReleased=false;lastInput=Stopwatch.GetTimestamp();
+            var wait=Stopwatch.StartNew();
+            while((Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0)
+            {
+                token.ThrowIfCancellationRequested();
+                if(wait.ElapsedMilliseconds>=DetailsKeyTimeoutMs)throw new InvalidOperationException("Windows did not confirm that Left Alt was pressed.");
+                Thread.Sleep(DetailsKeyPollMs);
+            }
+        }
+        void RecoverMouse()
+        {
+            bool restoreAlt=altPressed;
+            if(altPressed)
+            {
+                if(!Native.SetLeftAlt(false))throw new InvalidOperationException("Could not release Left Alt. Press and release it manually.");
+                altPressed=false;altReleased=true;
+            }
+            progress?.Scanning(target,"Mouse moved — retrying current item. Keep the mouse still to continue.");
+            log("Mouse moved. Discarding the unfinished attempt and waiting for the mouse to settle.");
+            var idle=Stopwatch.StartNew();
+            Native.GetCursorPos(out var previousCursor);
+            while(idle.ElapsedMilliseconds<MouseIdleBeforeRetryMs)
+            {
+                ScanPreparation.CheckCancellation(token);
+                if(Native.GetForegroundWindow()!=hwnd || Native.ClientBounds(hwnd)!=client)
+                    throw new OperationCanceledException("The game lost focus or moved during a retry.",token);
+                bool known=Native.GetCursorPos(out var cursor);
+                bool held=new[]{Keys.Menu,Keys.LButton,Keys.RButton}.Any(key=>(Native.GetAsyncKeyState((int)key)&Native.KeyDownMask)!=0);
+                if(!known || cursor!=previousCursor || held)idle.Restart();
+                previousCursor=cursor;
+                if(token.WaitHandle.WaitOne(25))token.ThrowIfCancellationRequested();
+            }
+            expectedCursor=null;context.ExpectedCursor=null;
+            if(restoreAlt)HoldAlt();
+            progress?.Scanning(target);
+        }
         void Check()
         {
             if(altPressed && (Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0)
@@ -165,7 +227,14 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
             if((Native.GetAsyncKeyState((int)Keys.Escape)&Native.KeyDownMask)!=0 || (Native.GetAsyncKeyState((int)Keys.LButton)&Native.KeyDownMask)!=0 || (Native.GetAsyncKeyState((int)Keys.RButton)&Native.KeyDownMask)!=0)
                 throw new OperationCanceledException("Stopped due to user input.");
             if(expectedCursor is Point p && Native.GetCursorPos(out var current) && (Math.Abs(p.X-current.X)>CursorTolerancePx || Math.Abs(p.Y-current.Y)>CursorTolerancePx))
-                throw new OperationCanceledException("The user moved the mouse.");
+            {
+                if(capturingItem)throw new MouseMovedException();
+                RecoverMouse();
+                // Preparation may be about to click a bank tab. Restore the verified
+                // position before allowing that operation to continue.
+                if(!Native.SetCursorPos(p.X,p.Y))throw new InvalidOperationException("Failed to restore the scan cursor position.");
+                expectedCursor=p;context.ExpectedCursor=p;lastInput=Stopwatch.GetTimestamp();
+            }
         }
         void Move(Point local)
         {
@@ -173,7 +242,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
             if(!Native.SetCursorPos(target.X,target.Y))throw new InvalidOperationException("Failed to move the mouse.");
             expectedCursor=target;context.ExpectedCursor=target;lastInput=Stopwatch.GetTimestamp();
         }
-        var session=sessionFolder ?? Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+(target==ScanTarget.Bank ? "" : "-"+layout.LocationType));
+        var session=sessionFolder ?? Path.Combine(root,DateTime.Now.ToString("yyyyMMdd-HHmmss-fff"));
         Directory.CreateDirectory(session);
         ocr?.Register(session);
         var results=new List<CellResult>();
@@ -281,175 +350,185 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null)
                 selectionMs=tabPreparation.Elapsed.TotalMilliseconds;
             }
             baseline.Save(Path.Combine(session,"baseline.png"));
+            progress?.RegisterSession(session,target,activeTab+1);
+            progress?.Scanning(target);
             var cells=layout.Slots().Select(slot=>(slot.Row,slot.Col,Occupied:Vision.Occupied(baseline,slot.Bounds))).ToArray();
             log($"Initially occupied: {cells.Count(c=>c.Occupied)}/{layout.SlotCount} cells.");
             log($"Build {BuildInfo.Configuration}; initial hover delay {hoverMs} ms; the following lines show frame capture/wait and tooltip search separately.");
             Check();
-            if((Native.GetAsyncKeyState((int)Keys.Menu)&Native.KeyDownMask)!=0)
-                throw new InvalidOperationException("Release Alt before starting capture.");
-            if(!Native.SetLeftAlt(true))
-                throw new InvalidOperationException("Failed to press Left Alt via SendInput. Check the privilege levels of the app and game.");
-            altPressed=true;lastInput=Stopwatch.GetTimestamp();
-            var altWait=Stopwatch.StartNew();
-            while((Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0)
-            {
-                token.ThrowIfCancellationRequested();
-                if(altWait.ElapsedMilliseconds>=DetailsKeyTimeoutMs)
-                    throw new InvalidOperationException("Windows did not confirm that Left Alt was pressed.");
-                Thread.Sleep(DetailsKeyPollMs);
-            }
+            HoldAlt();
             log("Left Alt is held: capturing detailed tooltips.");
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Panel ready in {readyMs:F0} ms: capture setup {captureSetupMs:F0}, first frame {initialFrameMs:F0}, panel search {panelSearchMs:F0}, selection {selectionMs:F0}, other preparation {readyMs-captureSetupMs-initialFrameMs-panelSearchMs-selectionMs:F0} ms.");
             Tooltip? previous=null;
             foreach(var cell in cells)
             {
-                Check();
                 if(!cell.Occupied){results.Add(new(cell.Row+1,cell.Col+1,"empty",null,null,0));continue;}
-                var cycle=Stopwatch.StartNew();var timing=new CellTiming();long startFrames=capture.Frames;
-                Pixels Read(long notBefore=0)
-                {
-                    long started=Stopwatch.GetTimestamp();
-                    var result=Next(capture,region,token,Math.Max(lastInput,notBefore));
-                    timing.CaptureMs+=Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-                    return result;
-                }
-                Move(layout.Park);
-                var clear=Stopwatch.StartNew();
-                Pixels before;
-                bool bankOpen,tooltipPresent;
-                int? observedTab;int validationFrames=0;
-                double tabDifference;
-                // A tooltip can relocate beside the parked cursor. Check that narrow
-                // placement corridor as well as its old footer, avoiding a full-frame scan.
-                // Keep the cursor parked while transient UI frames settle.
                 while(true)
                 {
-                    Check();before=Read();validationFrames++;
-                    tooltipPresent=previous is not null && vision.FooterPresent(before,layout.Scale,previous.Footer);
-                    if(!tooltipPresent)
-                        tooltipPresent=vision.FooterPresentNear(before,layout.Scale,layout.Park);
-                    bankOpen=vision.PanelStillOpen(before,layout);
-                    observedTab=CurrentTab(before);
-                    tabDifference=before.Difference(baseline,layout.VerificationArea,TabDifferenceStep);
-                    if(!tooltipPresent && bankOpen && observedTab==activeTab && tabDifference<=MaximumTabDifference)break;
-                    if(clear.ElapsedMilliseconds>=TooltipClearTimeoutMs)break;
-                }
-                timing.ParkMs=clear.Elapsed.TotalMilliseconds;
-                Check();
-                if(tooltipPresent || !bankOpen || observedTab!=activeTab || tabDifference>MaximumTabDifference)
-                {
-                    var reasons=new List<string>();
-                    if(tooltipPresent)reasons.Add("tooltip did not disappear after waiting");
-                    if(!bankOpen)reasons.Add("Panel not detected");
-                    if(observedTab!=activeTab)reasons.Add(observedTab<0 ? "active tab not detected" : "a different tab was detected");
-                    if(tabDifference>MaximumTabDifference)reasons.Add("panel verification area changed");
-                    string message=$"Failed to confirm panel readiness. Before cell {cell.Row+1}:{cell.Col+1}: {string.Join("; ",reasons)}. panel={bankOpen}; location={layout.LocationType}; tab={observedTab+1} (expected {activeTab+1}; blank = not applicable); difference={tabDifference:F3}, threshold={MaximumTabDifference:F3}; frames={validationFrames}, wait={timing.ParkMs:F0} ms.";
-                    panelValidationFailure=new
-                    {
-                        Row=cell.Row+1,Column=cell.Col+1,Reasons=reasons,PanelDetected=bankOpen,
-                        ExpectedTab=activeTab+1,ObservedTab=observedTab+1,TabNumbering="1-based; 0 means unrecognized",
-                        TabDifference=tabDifference,MaximumTabDifference,TabDifferenceStep,
-                        VerificationArea=layout.VerificationArea,PreviousTooltip=previous,Park=layout.Park,
-                        TooltipPresent=tooltipPresent,ValidationFrames=validationFrames,WaitMs=timing.ParkMs,
-                        MillisecondsSinceCursorMove=Stopwatch.GetElapsedTime(lastInput).TotalMilliseconds,
-                        Frame="panel-check-failed.png",Baseline="baseline.png"
-                    };
-                    log(message);
-                    // Preserve the exact rejected frame: a later capture can hide a transient failure.
                     try
                     {
-                        before.Save(Path.Combine(session,"panel-check-failed.png"));
-                        before.Crop(layout.VerificationArea).Save(Path.Combine(session,"panel-check-tabs.png"));
-                        baseline.Crop(layout.VerificationArea).Save(Path.Combine(session,"panel-check-tabs-baseline.png"));
-                        File.WriteAllText(Path.Combine(session,"panel-check.json"),JsonSerializer.Serialize(panelValidationFailure,new JsonSerializerOptions{WriteIndented=true}));
-                        log("Diagnostics saved: panel-check.json, panel-check-failed.png, and two verification area images.");
-                    }
-                    catch(Exception diagnosticError)
-                    {
-                        log($"Failed to save all diagnostics: {diagnosticError.Message}");
-                    }
-                    throw new InvalidOperationException(message);
-                }
-                var rect=layout.Cell(cell.Row,cell.Col);var hover=new Point(rect.X+rect.Width/2,rect.Y+rect.Height/2);Move(hover);
-                var watch=Stopwatch.StartNew();
-                Pixels? candidate=null;Pixels? lastTooltipFrame=null;Tooltip? located=null;int stable=0;bool saved=false;int headerRetries=0;bool incompleteHeader=false;
-                // Delay the first probe to avoid polling before the tooltip can appear.
-                // A queued frame rendered AFTER the hover is valid even if it predates
-                // the end of this sleep; requiring a later timestamp wastes another frame.
-                // Read still rejects pre-input frames and stability requires two frames.
-                if(token.WaitHandle.WaitOne(hoverMs))token.ThrowIfCancellationRequested();
-                long nextFullSearch=FirstFullSearchMs;
-                while(watch.ElapsedMilliseconds<TooltipTimeoutMs)
-                {
-                    Check();var frame=Read();lastTooltipFrame=frame;
-                    long searchStart=Stopwatch.GetTimestamp();Tooltip? found=null;
-                    if(located is not null)
-                    {
-                        timing.TrackCalls++;found=vision.TrackTooltip(frame,layout.Scale,located);
-                    }
-                    if(found is null)
-                    {
-                        timing.SearchCalls++;found=vision.FindTooltipNear(frame,layout.Scale,hover);
-                    }
-                    if(found is null && watch.ElapsedMilliseconds>=nextFullSearch)
-                    {
-                        // Exceptional placement/UI changes retain a broad fallback,
-                        // throttled so an absent tooltip never triggers it each frame.
-                        timing.FullSearchCalls++;found=vision.FindTooltip(frame,layout.Scale);
-                        nextFullSearch=watch.ElapsedMilliseconds+FullSearchIntervalMs;
-                    }
-                    timing.SearchMs+=Stopwatch.GetElapsedTime(searchStart).TotalMilliseconds;
-                    if(found is null){stable=0;located=null;candidate=null;continue;}
-                    var crop=frame.Crop(found.Bounds);
-                    stable=located?.Bounds==found.Bounds && candidate is not null && candidate.Difference(crop,crop.Bounds,StabilityDifferenceStep)<MaximumStableDifference ? stable+1 : 0;
-                    candidate=crop;located=found;
-                    if(stable+1<StableFrameCount)continue;
-                    Check();
-                    if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale) || !TooltipSegmenter.HasReadableLayout(crop))
-                    {
-                        incompleteHeader=true;
-                        frame.Save(Path.Combine(session,$"r{cell.Row+1:00}_c{cell.Col+1:00}-header-attempt-{headerRetries+1}.png"));
-                        if(headerRetries>=2)break;
-                        headerRetries++;
-                        log($"{cell.Row+1}:{cell.Col+1}: header cropped or text layout incomplete; retry {headerRetries}/2.");
+                        capturingItem=true;
+                        Check();
+                        var cycle=Stopwatch.StartNew();var timing=new CellTiming();long startFrames=capture.Frames;
+                        Pixels Read(long notBefore=0)
+                        {
+                            long started=Stopwatch.GetTimestamp();
+                            var result=Next(capture,region,token,Math.Max(lastInput,notBefore));
+                            timing.CaptureMs+=Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                            return result;
+                        }
                         Move(layout.Park);
-                        if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
-                        var clearRetry=Stopwatch.StartNew();
+                        var clear=Stopwatch.StartNew();
+                        Pixels before;
+                        bool bankOpen,tooltipPresent;
+                        int? observedTab;int validationFrames=0;
+                        double tabDifference;
+                        // A tooltip can relocate beside the parked cursor. Check that narrow
+                        // placement corridor as well as its old footer, avoiding a full-frame scan.
+                        // Keep the cursor parked while transient UI frames settle.
                         while(true)
                         {
-                            Check();var retryFrame=Read();
-                            if(!vision.PanelStillOpen(retryFrame,layout) || CurrentTab(retryFrame)!=activeTab)
-                                throw new InvalidOperationException("The scanned panel changed during recapture.");
-                            if(!vision.FooterPresent(retryFrame,layout.Scale,found.Footer) && !vision.FooterPresentNear(retryFrame,layout.Scale,layout.Park))break;
-                            if(clearRetry.ElapsedMilliseconds>=TooltipClearTimeoutMs)throw new InvalidOperationException("Failed to dismiss the tooltip for recapture.");
+                            Check();before=Read();validationFrames++;
+                            tooltipPresent=previous is not null && vision.FooterPresent(before,layout.Scale,previous.Footer);
+                            if(!tooltipPresent)
+                                tooltipPresent=vision.FooterPresentNear(before,layout.Scale,layout.Park);
+                            bankOpen=vision.PanelStillOpen(before,layout);
+                            observedTab=CurrentTab(before);
+                            tabDifference=before.Difference(baseline,layout.VerificationArea,TabDifferenceStep);
+                            if(!tooltipPresent && bankOpen && observedTab==activeTab && tabDifference<=MaximumTabDifference)break;
+                            if(clear.ElapsedMilliseconds>=TooltipClearTimeoutMs)break;
                         }
-                        hover=new Point(rect.X+rect.Width/2,headerRetries==1 ? rect.Top+rect.Height/4 : rect.Bottom-rect.Height/4);
-                        Move(hover);previous=null;located=null;candidate=null;stable=0;watch.Restart();nextFullSearch=FirstFullSearchMs;
+                        timing.ParkMs=clear.Elapsed.TotalMilliseconds;
+                        Check();
+                        if(tooltipPresent || !bankOpen || observedTab!=activeTab || tabDifference>MaximumTabDifference)
+                        {
+                            var reasons=new List<string>();
+                            if(tooltipPresent)reasons.Add("tooltip did not disappear after waiting");
+                            if(!bankOpen)reasons.Add("Panel not detected");
+                            if(observedTab!=activeTab)reasons.Add(observedTab<0 ? "active tab not detected" : "a different tab was detected");
+                            if(tabDifference>MaximumTabDifference)reasons.Add("panel verification area changed");
+                            string message=$"Failed to confirm panel readiness. Before cell {cell.Row+1}:{cell.Col+1}: {string.Join("; ",reasons)}. panel={bankOpen}; location={layout.LocationType}; tab={observedTab+1} (expected {activeTab+1}; blank = not applicable); difference={tabDifference:F3}, threshold={MaximumTabDifference:F3}; frames={validationFrames}, wait={timing.ParkMs:F0} ms.";
+                            panelValidationFailure=new
+                            {
+                                Row=cell.Row+1,Column=cell.Col+1,Reasons=reasons,PanelDetected=bankOpen,
+                                ExpectedTab=activeTab+1,ObservedTab=observedTab+1,TabNumbering="1-based; 0 means unrecognized",
+                                TabDifference=tabDifference,MaximumTabDifference,TabDifferenceStep,
+                                VerificationArea=layout.VerificationArea,PreviousTooltip=previous,Park=layout.Park,
+                                TooltipPresent=tooltipPresent,ValidationFrames=validationFrames,WaitMs=timing.ParkMs,
+                                MillisecondsSinceCursorMove=Stopwatch.GetElapsedTime(lastInput).TotalMilliseconds,
+                                Frame="panel-check-failed.png",Baseline="baseline.png"
+                            };
+                            log(message);
+                            // Preserve the exact rejected frame: a later capture can hide a transient failure.
+                            try
+                            {
+                                before.Save(Path.Combine(session,"panel-check-failed.png"));
+                                before.Crop(layout.VerificationArea).Save(Path.Combine(session,"panel-check-tabs.png"));
+                                baseline.Crop(layout.VerificationArea).Save(Path.Combine(session,"panel-check-tabs-baseline.png"));
+                                File.WriteAllText(Path.Combine(session,"panel-check.json"),JsonSerializer.Serialize(panelValidationFailure,new JsonSerializerOptions{WriteIndented=true}));
+                                log("Diagnostics saved: panel-check.json, panel-check-failed.png, and two verification area images.");
+                            }
+                            catch(Exception diagnosticError)
+                            {
+                                log($"Failed to save all diagnostics: {diagnosticError.Message}");
+                            }
+                            throw new InvalidOperationException(message);
+                        }
+                        var rect=layout.Cell(cell.Row,cell.Col);var hover=new Point(rect.X+rect.Width/2,rect.Y+rect.Height/2);Move(hover);
+                        var watch=Stopwatch.StartNew();
+                        Pixels? candidate=null;Pixels? lastTooltipFrame=null;Tooltip? located=null;int stable=0;bool saved=false;int headerRetries=0;bool incompleteHeader=false;
+                        // Delay the first probe to avoid polling before the tooltip can appear.
+                        // A queued frame rendered AFTER the hover is valid even if it predates
+                        // the end of this sleep; requiring a later timestamp wastes another frame.
+                        // Read still rejects pre-input frames and stability requires two frames.
                         if(token.WaitHandle.WaitOne(hoverMs))token.ThrowIfCancellationRequested();
-                        continue;
+                        long nextFullSearch=FirstFullSearchMs;
+                        while(watch.ElapsedMilliseconds<TooltipTimeoutMs)
+                        {
+                            Check();var frame=Read();lastTooltipFrame=frame;
+                            long searchStart=Stopwatch.GetTimestamp();Tooltip? found=null;
+                            if(located is not null)
+                            {
+                                timing.TrackCalls++;found=vision.TrackTooltip(frame,layout.Scale,located);
+                            }
+                            if(found is null)
+                            {
+                                timing.SearchCalls++;found=vision.FindTooltipNear(frame,layout.Scale,hover);
+                            }
+                            if(found is null && watch.ElapsedMilliseconds>=nextFullSearch)
+                            {
+                                // Exceptional placement/UI changes retain a broad fallback,
+                                // throttled so an absent tooltip never triggers it each frame.
+                                timing.FullSearchCalls++;found=vision.FindTooltip(frame,layout.Scale);
+                                nextFullSearch=watch.ElapsedMilliseconds+FullSearchIntervalMs;
+                            }
+                            timing.SearchMs+=Stopwatch.GetElapsedTime(searchStart).TotalMilliseconds;
+                            if(found is null){stable=0;located=null;candidate=null;continue;}
+                            var crop=frame.Crop(found.Bounds);
+                            stable=located?.Bounds==found.Bounds && candidate is not null && candidate.Difference(crop,crop.Bounds,StabilityDifferenceStep)<MaximumStableDifference ? stable+1 : 0;
+                            candidate=crop;located=found;
+                            if(stable+1<StableFrameCount)continue;
+                            Check();
+                            if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale) || !TooltipSegmenter.HasReadableLayout(crop))
+                            {
+                                incompleteHeader=true;
+                                frame.Save(Path.Combine(session,$"r{cell.Row+1:00}_c{cell.Col+1:00}-header-attempt-{headerRetries+1}.png"));
+                                if(headerRetries>=2)break;
+                                headerRetries++;
+                                log($"{cell.Row+1}:{cell.Col+1}: header cropped or text layout incomplete; retry {headerRetries}/2.");
+                                Move(layout.Park);
+                                if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
+                                var clearRetry=Stopwatch.StartNew();
+                                while(true)
+                                {
+                                    Check();var retryFrame=Read();
+                                    if(!vision.PanelStillOpen(retryFrame,layout) || CurrentTab(retryFrame)!=activeTab)
+                                        throw new InvalidOperationException("The scanned panel changed during recapture.");
+                                    if(!vision.FooterPresent(retryFrame,layout.Scale,found.Footer) && !vision.FooterPresentNear(retryFrame,layout.Scale,layout.Park))break;
+                                    if(clearRetry.ElapsedMilliseconds>=TooltipClearTimeoutMs)throw new InvalidOperationException("Failed to dismiss the tooltip for recapture.");
+                                }
+                                hover=new Point(rect.X+rect.Width/2,headerRetries==1 ? rect.Top+rect.Height/4 : rect.Bottom-rect.Height/4);
+                                Move(hover);previous=null;located=null;candidate=null;stable=0;watch.Restart();nextFullSearch=FirstFullSearchMs;
+                                if(token.WaitHandle.WaitOne(hoverMs))token.ThrowIfCancellationRequested();
+                                continue;
+                            }
+                            string filename=$"r{cell.Row+1:00}_c{cell.Col+1:00}.png";
+                            Check();
+                            long queueStart=Stopwatch.GetTimestamp();
+                            queue.Writer.WriteAsync((crop,Path.Combine(session,filename)),token).AsTask().GetAwaiter().GetResult();
+                            timing.QueueWaitMs=Stopwatch.GetElapsedTime(queueStart).TotalMilliseconds;
+                            timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
+                            results.Add(new(cell.Row+1,cell.Col+1,"captured",filename,found.Bounds,watch.Elapsed.TotalMilliseconds,timing));
+                            previous=found;saved=true;
+                            log($"{cell.Row+1}:{cell.Col+1} → {filename} ({watch.ElapsedMilliseconds} ms; total {timing.TotalMs:F0}; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; parking/verification {timing.ParkMs:F0}; full searches {timing.FullSearchCalls})");break;
+                        }
+                        if(!saved)
+                        {
+                            Check();
+                            // Preserve the last hovered frame before parking overwrites
+                            // the capture buffer, including failures without a footer match.
+                            string diagnostic=$"r{cell.Row+1:00}_c{cell.Col+1:00}-tooltip-failed.png";
+                            lastTooltipFrame?.Save(Path.Combine(session,diagnostic));
+                            timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
+                            results.Add(new(cell.Row+1,cell.Col+1,incompleteHeader ? "incomplete_tooltip" : "no_stable_tooltip",null,located?.Bounds,watch.Elapsed.TotalMilliseconds,timing));
+                            progress?.CaptureFailed(target,activeTab+1,cell.Row+1,cell.Col+1,
+                                incompleteHeader ? "The tooltip was incomplete after retries." : "A stable tooltip could not be captured.");
+                            capturingItem=false; // This slot is committed; later motion must not retry or count it twice.
+                            log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "complete tooltip not confirmed" : "stable tooltip not found")} (total {timing.TotalMs:F0} ms; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; full searches {timing.FullSearchCalls}); diagnostic: {diagnostic}.");
+                            // Clear any late tooltip, including one that did not reach stability.
+                            Move(layout.Park);Thread.Sleep(FailedTooltipParkMs);var f=Read();
+                            previous=vision.FindTooltip(f,layout.Scale);
+                        }
+                        break;
                     }
-                    string filename=$"r{cell.Row+1:00}_c{cell.Col+1:00}.png";
-                    long queueStart=Stopwatch.GetTimestamp();
-                    queue.Writer.WriteAsync((crop,Path.Combine(session,filename)),token).AsTask().GetAwaiter().GetResult();
-                    timing.QueueWaitMs=Stopwatch.GetElapsedTime(queueStart).TotalMilliseconds;
-                    timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
-                    results.Add(new(cell.Row+1,cell.Col+1,"captured",filename,found.Bounds,watch.Elapsed.TotalMilliseconds,timing));
-                    previous=found;saved=true;
-                    log($"{cell.Row+1}:{cell.Col+1} → {filename} ({watch.ElapsedMilliseconds} ms; total {timing.TotalMs:F0}; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; parking/verification {timing.ParkMs:F0}; full searches {timing.FullSearchCalls})");break;
-                }
-                if(!saved)
-                {
-                    // Preserve the last hovered frame before parking overwrites
-                    // the capture buffer, including failures without a footer match.
-                    string diagnostic=$"r{cell.Row+1:00}_c{cell.Col+1:00}-tooltip-failed.png";
-                    lastTooltipFrame?.Save(Path.Combine(session,diagnostic));
-                    timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
-                    results.Add(new(cell.Row+1,cell.Col+1,incompleteHeader ? "incomplete_tooltip" : "no_stable_tooltip",null,located?.Bounds,watch.Elapsed.TotalMilliseconds,timing));
-                    log($"{cell.Row+1}:{cell.Col+1}: {(incompleteHeader ? "complete tooltip not confirmed" : "stable tooltip not found")} (total {timing.TotalMs:F0} ms; capture {timing.CaptureMs:F0}; search {timing.SearchMs:F0}; full searches {timing.FullSearchCalls}); diagnostic: {diagnostic}.");
-                    // Clear any late tooltip, including one that did not reach stability.
-                    Move(layout.Park);Thread.Sleep(FailedTooltipParkMs);var f=Read();
-                    previous=vision.FindTooltip(f,layout.Scale);
+                    catch(MouseMovedException)
+                    {
+                        capturingItem=false;
+                        RecoverMouse();
+                        previous=null;
+                    }
+                    finally { capturingItem=false; }
                 }
             }
             Check();Move(layout.Park);

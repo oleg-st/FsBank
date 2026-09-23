@@ -19,9 +19,14 @@ internal sealed class OcrPipeline
     private readonly Stopwatch elapsed = Stopwatch.StartNew();
     private readonly Action<string> log;
     private int queued, finished;
-    public OcrPipeline(Action<string> log, int? workerCount = null)
+    private readonly Action<string>? onQueued;
+    private readonly Action<string, ItemRecognition.Result?, Exception?>? onRecognized;
+    public OcrPipeline(Action<string> log, int? workerCount = null,
+        Action<string>? onQueued = null, Action<string, ItemRecognition.Result?, Exception?>? onRecognized = null)
     {
         this.log = log;
+        this.onQueued = onQueued;
+        this.onRecognized = onRecognized;
         int count = workerCount ?? DefaultWorkers;
         if (count < 1) throw new ArgumentOutOfRangeException(nameof(workerCount));
         workers = Enumerable.Range(0, count).Select(_ => Task.Run(async () =>
@@ -31,9 +36,12 @@ internal sealed class OcrPipeline
                 using var reader = new NativeTextReader();
                 await foreach (string file in queue.Reader.ReadAllAsync())
                 {
-                    try { sessions[Path.GetDirectoryName(file)!].Add(ItemRecognition.RecognizeFile(file, reader, _ => {}, CancellationToken.None)); }
-                    catch (Exception e) { errors.Enqueue(file + ": " + e.Message); }
+                    ItemRecognition.Result? result = null;
+                    Exception? failure = null;
+                    try { result = ItemRecognition.RecognizeFile(file, reader, _ => {}, CancellationToken.None); sessions[Path.GetDirectoryName(file)!].Add(result); }
+                    catch (Exception e) { failure = e; errors.Enqueue(file + ": " + e.Message); }
                     finally { Interlocked.Increment(ref finished); }
+                    onRecognized?.Invoke(file, result, failure);
                 }
             }
             catch (Exception e) { errors.Enqueue("OCR worker: " + e.Message); }
@@ -43,7 +51,13 @@ internal sealed class OcrPipeline
     public void Register(string session) => sessions.TryAdd(session, new());
     public void Enqueue(string file)
     {
-        if (!queue.Writer.TryWrite(file)) throw new InvalidOperationException("OCR queue is closed.");
+        // Publish admission before a fast worker can publish its result.
+        onQueued?.Invoke(file);
+        if (!queue.Writer.TryWrite(file))
+        {
+            var error=new InvalidOperationException("OCR queue is closed.");
+            onRecognized?.Invoke(file,null,error);throw error;
+        }
         Interlocked.Increment(ref queued);
     }
     public void Complete()
@@ -53,6 +67,14 @@ internal sealed class OcrPipeline
         log($"Capture finished; OCR remaining: {queued - Volatile.Read(ref finished)}.");
         var all = Task.WhenAll(workers);
         while (!all.Wait(1000)) log($"OCR remaining: {queued - Volatile.Read(ref finished)}.");
+        // A worker can fail during native OCR initialization. Surface every stranded
+        // capture as an issue instead of leaving the UI in "recognizing" forever.
+        while(queue.Reader.TryRead(out string? file))
+        {
+            var failure=new InvalidOperationException("OCR workers could not process this capture.");
+            errors.Enqueue(file+": "+failure.Message);Interlocked.Increment(ref finished);
+            onRecognized?.Invoke(file,null,failure);
+        }
         foreach (var session in sessions)
         {
             ItemRecognition.WriteReport(session.Key, session.Value, elapsed.Elapsed.TotalSeconds, log);

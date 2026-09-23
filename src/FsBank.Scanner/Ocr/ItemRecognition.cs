@@ -36,7 +36,7 @@ internal static class ItemRecognition
             .Select(file => RecognizeFile(file, reader, log, token)).ToArray();
         return WriteReport(session, results, timer.Elapsed.TotalSeconds, log);
     }
-    internal sealed record Result(string File, object Data, string Card, int Lines);
+    internal sealed record Result(string File, object Data, string Card, int Lines, string? Issue = null);
     internal static Result RecognizeFile(string file, NativeTextReader reader, Action<string> log, CancellationToken token)
     {
         string output = Path.GetDirectoryName(file)!;
@@ -83,7 +83,8 @@ internal static class ItemRecognition
         cards.Append("</table></article>");
 
         log($"{name}: {lines.Count} lines, {item.Stats.Count} stats, {item.Modifiers.Count} modifier blocks");
-        return new(file, data, cards.ToString(), lines.Count);
+        return new(file, data, cards.ToString(), lines.Count,
+            item.Warnings.Count == 0 ? null : string.Join("; ", item.Warnings.Distinct()));
 
     }
     internal static string WriteReport(string session, IEnumerable<Result> results, double seconds, Action<string> log)

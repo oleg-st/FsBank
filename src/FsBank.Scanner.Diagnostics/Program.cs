@@ -17,6 +17,7 @@ internal static class Program
             Console.WriteLine("""
                 FsBank.Scanner.Diagnostics commands:
                   --verify-export <output>
+                  --verify-ui <output>
                   --inspect-capture-layout <batch> <output>
                   --verify-capture-recovery <20260922-205823-892-all> <output>
                   --verify-character-panel <image> <output>
@@ -35,6 +36,12 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==2 && args[0]=="--verify-ui")
+        {
+            try { ScanUiCheck.Run(Path.GetFullPath(args[1])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==2 && args[0]=="--verify-export")

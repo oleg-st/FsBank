@@ -2,6 +2,7 @@ using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning.Batch;
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace FsBank.Scanner.Export;
 
@@ -9,12 +10,23 @@ namespace FsBank.Scanner.Export;
 internal sealed class ScanExport(string root, bool debug) : IDisposable
 {
     public string WorkingRoot { get; } = Path.Combine(Path.GetTempPath(), "FsBank", Guid.NewGuid().ToString("N"));
+    public List<string> Destinations { get; } = [];
+    public bool PreserveWorkingFiles { get; private set; }
 
     public void Complete(Action<string> log)
+    {
+        try { CompleteCore(log); }
+        catch { PreserveWorkingFiles = true; throw; }
+    }
+
+    private void CompleteCore(Action<string> log)
     {
         if (!Directory.Exists(WorkingRoot)) return;
         foreach (string capture in Directory.GetDirectories(WorkingRoot))
         {
+            // Batch/session metadata and baseline images are created before the
+            // first item. They alone do not justify a permanent result folder.
+            if (!HasResultData(capture)) continue;
             string source = capture;
             if (!File.Exists(Path.Combine(source, "batch.json")))
             {
@@ -54,11 +66,32 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
                 CompactExport.Write(destination, report.RootElement.GetProperty("items").EnumerateArray());
             }
             log("Export: " + destination);
+            Destinations.Add(destination);
         }
+    }
+
+    private bool HasResultData(string capture)
+    {
+        foreach(string file in Directory.EnumerateFiles(capture,"*",SearchOption.AllDirectories))
+        {
+            string name=Path.GetFileName(file);
+            if(Regex.IsMatch(name,@"^r\d+_c\d+\.png$",RegexOptions.IgnoreCase))return true;
+            // Explicit diagnostics must still help when capturing an item failed.
+            if(debug && Path.GetExtension(name).Equals(".png",StringComparison.OrdinalIgnoreCase)
+                && !name.Equals("baseline.png",StringComparison.OrdinalIgnoreCase))return true;
+            if(name is not ("full.json" or "session.json"))continue;
+            using var document=JsonDocument.Parse(File.ReadAllText(file));
+            var record=document.RootElement;
+            if(name=="full.json" && record.TryGetProperty("items",out var items) && items.GetArrayLength()>0)return true;
+            if(name=="session.json" && record.TryGetProperty("Cells",out var cells)
+                && cells.EnumerateArray().Any(cell=>cell.TryGetProperty("Status",out var status)
+                    && status.GetString() is "captured" or "ocr_failed" or "incomplete_tooltip" or "no_stable_tooltip"))return true;
+        }
+        return false;
     }
 
     public void Dispose()
     {
-        if (Directory.Exists(WorkingRoot)) Directory.Delete(WorkingRoot, recursive: true);
+        if (!PreserveWorkingFiles && Directory.Exists(WorkingRoot)) Directory.Delete(WorkingRoot, recursive: true);
     }
 }

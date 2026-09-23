@@ -15,6 +15,7 @@ internal static class ScanExportCheck
         CheckStatOrigins();
         CheckWrappedTitles();
         CheckBrowserEscaping(root);
+        CheckEmptyRuns(root);
         foreach (bool debug in new[] { false, true })
         foreach (bool partial in new[] { false, true })
         {
@@ -24,10 +25,12 @@ internal static class ScanExportCheck
             {
                 BatchScan.Run(export.WorkingRoot, (index, session) =>
                 {
+                    bool captured=index==-2;
                     Directory.CreateDirectory(session);
                     File.WriteAllText(Path.Combine(session, "session.json"), JsonSerializer.Serialize(new
-                    { Status="completed", ActiveTab=index+1, Cells=Array.Empty<object>() }));
-                    File.WriteAllText(Path.Combine(session, "full.json"), "{\"items\":[]}");
+                    { Status="completed", ActiveTab=index+1, Cells=captured ? new[]{new { Status="captured" }} : [] }));
+                    File.WriteAllText(Path.Combine(session, "full.json"), captured ? "{\"items\":[{\"file\":\"r01_c01.png\",\"item\":{}}]}" : "{\"items\":[]}");
+                    if(captured)File.WriteAllBytes(Path.Combine(session,"r01_c01.png"),[1,2,3]);
                     File.WriteAllText(Path.Combine(session, "report.html"), "test");
                     if (partial) throw new OperationCanceledException();
                 }, _ => {}, CancellationToken.None, everything:true);
@@ -65,6 +68,47 @@ internal static class ScanExportCheck
             using var items = JsonDocument.Parse(File.ReadAllText(Path.Combine(result, "items.json")));
             if (items.RootElement[0].GetProperty("location").GetProperty("type").GetString() != (location == "unknown" ? "bank" : location))
                 throw new Exception("Incorrect location");
+        }
+    }
+
+    private static void CheckEmptyRuns(string root)
+    {
+        foreach(bool debug in new[]{false,true})
+        foreach(string scenario in new[]{"waiting","manual-pending","empty","ocr-failed","capture-failed","diagnostic-failed"})
+        {
+            string output=Path.Combine(root,$"no-empty-{debug}-{scenario}");
+            string temporary;
+            using(var export=new ScanExport(output,debug))
+            {
+                temporary=export.WorkingRoot;
+                if(scenario=="waiting")
+                {
+                    try { BatchScan.RunSelection(temporary,new(Scanning.ScanMode.Auto,true,true,true,true),(_,_)=>throw new OperationCanceledException(),_=>{},CancellationToken.None); }
+                    catch(OperationCanceledException) { }
+                }
+                else
+                {
+                    string session=Path.Combine(temporary,"capture");Directory.CreateDirectory(session);
+                    File.WriteAllText(Path.Combine(session,"session.json"),JsonSerializer.Serialize(new
+                    {
+                        LocationType="equipped",Status="cancelled",Cells=new[] { new { Status=scenario switch
+                        { "manual-pending"=>"pending","ocr-failed"=>"ocr_failed","capture-failed"=>"no_stable_tooltip",_=>"empty" } } }
+                    }));
+                    File.WriteAllBytes(Path.Combine(session,"baseline.png"),[1,2,3]);
+                    File.WriteAllText(Path.Combine(session,"full.json"),"{\"items\":[]}");
+                    if(scenario=="ocr-failed")File.WriteAllBytes(Path.Combine(session,"r01_c01.png"),[1,2,3]);
+                    if(scenario=="diagnostic-failed")File.WriteAllBytes(Path.Combine(session,"panel-check-failed.png"),[1,2,3]);
+                }
+                export.Complete(_=>{});
+                bool expected=scenario is "ocr-failed" or "capture-failed" || debug && scenario=="diagnostic-failed";
+                if(expected)
+                {
+                    if(export.Destinations.Count!=1)throw new Exception("Item failure or requested diagnostics were discarded: "+scenario);
+                    CheckItemBrowser(export.Destinations.Single());
+                }
+                else if(export.Destinations.Count!=0 || Directory.Exists(output))throw new Exception("Empty run created an export: "+scenario);
+            }
+            if(Directory.Exists(temporary))throw new Exception("Temporary empty-run data was not cleaned up.");
         }
     }
 

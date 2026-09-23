@@ -8,6 +8,7 @@ internal static class ScanConstants
     public const int DetailsKeyTimeoutMs = 250;
     public const int DetailsKeyPollMs = 10;
     public const int CursorTolerancePx = 5;
+    public const int MouseIdleBeforeRetryMs = 300;
     public const int SaveQueueCapacity = 8;
     public const int InitialParkMs = 140;
     public const int TooltipClearTimeoutMs = 1200;

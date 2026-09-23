@@ -41,6 +41,12 @@ internal static class BatchRecognition
             int count=0;
             if(available)
             {
+                if(location=="bank" && number==0 && File.Exists(Path.Combine(session,"session.json")))
+                {
+                    using var metadata=JsonDocument.Parse(File.ReadAllText(Path.Combine(session,"session.json")));
+                    if(metadata.RootElement.TryGetProperty("ActiveTab",out var actual) && actual.ValueKind==JsonValueKind.Number && actual.TryGetInt32(out int detected)
+                        && detected>=1 && detected<=BankGeometry.TabCount)number=detected;
+                }
                 log($"OCR: {name}");
                 recognizeTab(session);
                 var data=JsonNode.Parse(File.ReadAllText(CompactExport.FullReportPath(session)))!;
