@@ -3,6 +3,7 @@ using FsBank.Scanner.Game;
 using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning.Manual;
 using System.Text.Json;
+using System.Diagnostics;
 
 namespace FsBank.Scanner.Scanning;
 
@@ -70,12 +71,14 @@ internal sealed class ScanController(Action<string> log)
         progress.Finish(outcome,message);
         foreach(string folder in export.Destinations)
         {
+            var timer=Stopwatch.StartNew();
             try { WriteSummary(folder,progress.Snapshot); }
             catch(Exception e)
             {
                 string error="Items were exported, but the scan summary could not be saved: "+e.Message;
                 log(error);progress.Finish(ScanPhase.Failed,error);
             }
+            finally { log($"Saving: scan summary and issues {timer.Elapsed.TotalSeconds:F3} s."); }
         }
         return new(progress.Snapshot,export.Destinations.ToArray(),export.PreserveWorkingFiles ? export.WorkingRoot : null);
     }

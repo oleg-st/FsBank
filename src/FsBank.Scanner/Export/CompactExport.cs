@@ -39,6 +39,11 @@ internal static class CompactExport
         var items = new JsonArray();
         foreach (var row in rows)
             items.Add(Project(row, tab, locationType));
+        return WriteItems(folder, items);
+    }
+
+    internal static string WriteItems(string folder, JsonArray items)
+    {
         string json = items.ToJsonString(Options);
         string output = Path.Combine(folder, "items.json");
         File.WriteAllText(output, json);

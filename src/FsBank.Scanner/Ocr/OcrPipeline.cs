@@ -75,15 +75,23 @@ internal sealed class OcrPipeline
             errors.Enqueue(file+": "+failure.Message);Interlocked.Increment(ref finished);
             onRecognized?.Invoke(file,null,failure);
         }
+        double drainSeconds = tail.Elapsed.TotalSeconds;
+        log($"Finishing: OCR drain {drainSeconds:F3} s.");
+        var reportTimer = Stopwatch.StartNew();
         foreach (var session in sessions)
         {
+            var sessionTimer = Stopwatch.StartNew();
             ItemRecognition.WriteReport(session.Key, session.Value, elapsed.Elapsed.TotalSeconds, log);
+            log($"Finishing: {Path.GetFileName(session.Key)} reports {sessionTimer.Elapsed.TotalSeconds:F3} s.");
             File.WriteAllText(Path.Combine(session.Key, "pipeline.json"), JsonSerializer.Serialize(new
-            { workers = workers.Length, queued, finished, tailSeconds = tail.Elapsed.TotalSeconds, errors = errors.ToArray(), status = errors.IsEmpty && queued == finished ? "completed" : "failed" }, new JsonSerializerOptions { WriteIndented = true }));
+            { workers = workers.Length, queued, finished, tailSeconds = tail.Elapsed.TotalSeconds, drainSeconds, reportSeconds = sessionTimer.Elapsed.TotalSeconds, errors = errors.ToArray(), status = errors.IsEmpty && queued == finished ? "completed" : "failed" }, new JsonSerializerOptions { WriteIndented = true }));
         }
+        log($"Finishing: session reports total {reportTimer.Elapsed.TotalSeconds:F3} s.");
+        reportTimer.Restart();
         foreach (string parent in sessions.Keys.Select(s => Path.GetDirectoryName(s)!).Distinct())
             if (File.Exists(Path.Combine(parent, "batch.json")))
                 BatchRecognition.Run(parent, s => Path.Combine(s, "report.html"), log, CancellationToken.None);
+        log($"Finishing: batch reports {reportTimer.Elapsed.TotalSeconds:F3} s.");
         log($"OCR finished: {finished}/{queued}; tail {tail.Elapsed.TotalSeconds:F1} s; errors {errors.Count}.");
         if (!errors.IsEmpty || queued != finished) throw new InvalidOperationException("OCR incomplete. See pipeline.json: " + string.Join("; ", errors.Take(3)));
     }

@@ -16,6 +16,7 @@ internal static class ScanExportCheck
         CheckWrappedTitles();
         CheckBrowserEscaping(root);
         CheckEmptyRuns(root);
+        CheckInterruptedMerge(root);
         foreach (bool debug in new[] { false, true })
         foreach (bool partial in new[] { false, true })
         {
@@ -69,6 +70,29 @@ internal static class ScanExportCheck
             if (items.RootElement[0].GetProperty("location").GetProperty("type").GetString() != (location == "unknown" ? "bank" : location))
                 throw new Exception("Incorrect location");
         }
+    }
+
+    private static void CheckInterruptedMerge(string root)
+    {
+        string folder=Path.Combine(root,"interrupted-merge");
+        string session=Path.Combine(folder,"tab-01");
+        Directory.CreateDirectory(session);
+        File.WriteAllText(Path.Combine(folder,"batch.json"),"""{"Status":"completed","Tabs":[{"Tab":1,"Status":"completed"}]}""");
+        File.WriteAllText(Path.Combine(session,"session.json"),"{}");
+        File.WriteAllText(Path.Combine(session,"full.json"),"""{"items":[{"file":"r01_c01.png","status":"recognized","item":{}}]}""");
+        BatchRecognition.Run(folder,_=>"",_=>{},CancellationToken.None);
+        byte[] original=File.ReadAllBytes(Path.Combine(folder,"full.json"));
+        using var cancellation=new CancellationTokenSource();
+        try
+        {
+            BatchRecognition.Run(folder,_=> { cancellation.Cancel();return ""; },_=>{},cancellation.Token);
+            throw new Exception("Cancelled merge succeeded.");
+        }
+        catch(OperationCanceledException) { }
+        if(!original.SequenceEqual(File.ReadAllBytes(Path.Combine(folder,"full.json")))
+            || File.Exists(Path.Combine(folder,"full.json.tmp")))
+            throw new Exception("Cancelled merge damaged the previous report or left temporary output.");
+        CheckItemBrowser(folder);
     }
 
     private static void CheckEmptyRuns(string root)

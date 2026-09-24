@@ -83,12 +83,12 @@ internal sealed class ScanOverlay : Form
             if(slots.Layout.Bounds.Left>width+inset*2)x=slots.Layout.Bounds.Left-width-inset;
             else if(slots.Layout.Bounds.Right+width+inset*2<ClientSize.Width)x=slots.Layout.Bounds.Right+inset;
         }
-        // Single-surface layout: allocate rows only for content that is visible.
+        // Reserve the recognition row so draining the OCR queue does not resize the card.
         int messageHeight=MessageHeight(width);
         int height=Px(20)+Px(26)+Px(21)*(snapshot?.Areas.Length ?? 0)
             +Px(18)*(snapshot?.Areas.Count(area=>area.Tab is not null) ?? 0)+Px(8)
             +(messageHeight>0 ? messageHeight+Px(6) : 0)
-            +(snapshot?.Pending>0 ? Px(21) : 0)+(FooterText.Length>0 ? Px(21) : 0);
+            +Px(21)+(FooterText.Length>0 ? Px(21) : 0);
         progressBounds=new(Math.Clamp(x,0,Math.Max(0,ClientSize.Width-width)),y,width,height);
     }
     private void RefreshVisibility()
@@ -174,7 +174,7 @@ internal sealed class ScanOverlay : Form
                 TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding|TextFormatFlags.WordBreak|TextFormatFlags.PreserveGraphicsClipping);
             y+=messageHeight+Px(6);
         }
-        if(snapshot.Pending>0)Text($"Recognizing: {snapshot.Pending}",Color.Silver,21);
+        Text(snapshot.Pending>0 ? $"Recognizing: {snapshot.Pending}" : "",Color.Silver,21);
         if(FooterText.Length>0)Text(FooterText,snapshot.Phase==ScanPhase.Completed ? Color.LightGreen : Color.Silver,21);
     }
     protected override void Dispose(bool disposing)

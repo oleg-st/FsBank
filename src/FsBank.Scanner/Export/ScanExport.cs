@@ -3,6 +3,7 @@ using FsBank.Scanner.Scanning.Batch;
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Diagnostics;
 
 namespace FsBank.Scanner.Export;
 
@@ -12,11 +13,15 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
     public string WorkingRoot { get; } = Path.Combine(Path.GetTempPath(), "FsBank", Guid.NewGuid().ToString("N"));
     public List<string> Destinations { get; } = [];
     public bool PreserveWorkingFiles { get; private set; }
+    private Action<string>? timingLog;
 
     public void Complete(Action<string> log)
     {
+        timingLog = log;
+        var timer = Stopwatch.StartNew();
         try { CompleteCore(log); }
         catch { PreserveWorkingFiles = true; throw; }
+        finally { log($"Saving: export total {timer.Elapsed.TotalSeconds:F3} s."); }
     }
 
     private void CompleteCore(Action<string> log)
@@ -24,9 +29,12 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
         if (!Directory.Exists(WorkingRoot)) return;
         foreach (string capture in Directory.GetDirectories(WorkingRoot))
         {
+            var timer = Stopwatch.StartNew();
             // Batch/session metadata and baseline images are created before the
             // first item. They alone do not justify a permanent result folder.
             if (!HasResultData(capture)) continue;
+            log($"Saving: result check {timer.Elapsed.TotalSeconds:F3} s.");
+            timer.Restart();
             string source = capture;
             if (!File.Exists(Path.Combine(source, "batch.json")))
             {
@@ -47,8 +55,15 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
                 File.WriteAllText(Path.Combine(source, "batch.json"), JsonSerializer.Serialize(new
                 { Status = entry.Status, Error = entry.Error, Mode = location, Tabs = new[] { entry } }));
             }
-            BatchRecognition.Run(source, s => File.Exists(Path.Combine(s, "full.json"))
-                ? Path.Combine(s, "report.html") : ItemRecognition.WriteReport(s, [], 0, log), log, CancellationToken.None);
+            // The drained pipeline already built this batch from the final session
+            // reports. Reuse it only when the entire set of artifacts is present.
+            bool ready = new[] { "full.json", "items.json", "items.html", "report.html" }
+                .All(name => File.Exists(Path.Combine(source, name)));
+            if (!ready)
+                BatchRecognition.Run(source, s => File.Exists(Path.Combine(s, "full.json"))
+                    ? Path.Combine(s, "report.html") : ItemRecognition.WriteReport(s, [], 0, log), log, CancellationToken.None);
+            log($"Saving: batch reports {timer.Elapsed.TotalSeconds:F3} s ({(ready ? "reused" : "built")}).");
+            timer.Restart();
             string destination = Path.Combine(Path.GetFullPath(root), Path.GetFileName(capture));
             Directory.CreateDirectory(destination);
             if (debug)
@@ -62,9 +77,11 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
             }
             else
             {
-                using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(source, "full.json")));
-                CompactExport.Write(destination, report.RootElement.GetProperty("items").EnumerateArray());
+                // These files already contain the final merged locations and data.
+                File.Copy(Path.Combine(source, "items.json"), Path.Combine(destination, "items.json"));
+                File.Copy(Path.Combine(source, "items.html"), Path.Combine(destination, "items.html"));
             }
+            log($"Saving: {(debug ? "diagnostic" : "compact")} file copy {timer.Elapsed.TotalSeconds:F3} s.");
             log("Export: " + destination);
             Destinations.Add(destination);
         }
@@ -72,6 +89,7 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
 
     private bool HasResultData(string capture)
     {
+        var reports = new List<string>();
         foreach(string file in Directory.EnumerateFiles(capture,"*",SearchOption.AllDirectories))
         {
             string name=Path.GetFileName(file);
@@ -79,19 +97,32 @@ internal sealed class ScanExport(string root, bool debug) : IDisposable
             // Explicit diagnostics must still help when capturing an item failed.
             if(debug && Path.GetExtension(name).Equals(".png",StringComparison.OrdinalIgnoreCase)
                 && !name.Equals("baseline.png",StringComparison.OrdinalIgnoreCase))return true;
-            if(name is not ("full.json" or "session.json"))continue;
+            // Full OCR reports can be hundreds of MB. Prefer small capture
+            // metadata and filenames before parsing them as a fallback.
+            if(name=="full.json") { reports.Add(file);continue; }
+            if(name!="session.json")continue;
             using var document=JsonDocument.Parse(File.ReadAllText(file));
             var record=document.RootElement;
-            if(name=="full.json" && record.TryGetProperty("items",out var items) && items.GetArrayLength()>0)return true;
             if(name=="session.json" && record.TryGetProperty("Cells",out var cells)
                 && cells.EnumerateArray().Any(cell=>cell.TryGetProperty("Status",out var status)
                     && status.GetString() is "captured" or "ocr_failed" or "incomplete_tooltip" or "no_stable_tooltip"))return true;
+        }
+        foreach(string file in reports)
+        {
+            using var document=JsonDocument.Parse(File.ReadAllBytes(file));
+            if(document.RootElement.TryGetProperty("items",out var items) && items.GetArrayLength()>0)return true;
         }
         return false;
     }
 
     public void Dispose()
     {
-        if (!PreserveWorkingFiles && Directory.Exists(WorkingRoot)) Directory.Delete(WorkingRoot, recursive: true);
+        if (PreserveWorkingFiles || !Directory.Exists(WorkingRoot)) return;
+        var timer = Stopwatch.StartNew();
+        try
+        {
+            Directory.Delete(WorkingRoot, recursive: true);
+        }
+        finally { timingLog?.Invoke($"Saving: temporary file cleanup {timer.Elapsed.TotalSeconds:F3} s."); }
     }
 }

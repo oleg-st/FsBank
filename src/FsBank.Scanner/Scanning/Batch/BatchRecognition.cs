@@ -26,52 +26,83 @@ internal static class BatchRecognition
     {
         using var batch=JsonDocument.Parse(File.ReadAllText(Path.Combine(folder,"batch.json")));
         var tabs=batch.RootElement.GetProperty("Tabs").EnumerateArray().ToArray();
-        var combined=new JsonArray();var summaries=new JsonArray();var links=new List<string>();
+        var compactItems=new JsonArray();var summaries=new JsonArray();var links=new List<string>();
+        int itemCount=0;
         string output=folder;Directory.CreateDirectory(output);
-        foreach(var tab in tabs)
+        // Stream diagnostic rows without materializing/cloning the complete OCR
+        // symbol tree. Keep only the small browser projection in memory.
+        string fullPath=Path.Combine(output,"full.json");
+        string pendingPath=fullPath+".tmp";
+        try
         {
-            token.ThrowIfCancellationRequested();
-            int number=tab.GetProperty("Tab").GetInt32();
-            string location=tab.TryGetProperty("LocationType",out var kind) ? kind.GetString() ?? "bank" : "bank";
-            if(location is not ("bank" or "equipped" or "inventory"))throw new InvalidDataException("Unknown scan location.");
-            if(location=="bank" && (number<0 || number>BankGeometry.TabCount))throw new InvalidOperationException("Invalid tab number in batch.json.");
-            string name=location=="bank" ? (number>0 ? $"tab-{number:00}" : "tab") : location,session=Path.Combine(folder,name);
-            string status=tab.GetProperty("Status").GetString() ?? "unknown";
-            bool available=Directory.Exists(session) && (File.Exists(Path.Combine(session,"session.json")) || Directory.EnumerateFiles(session,"r??_c??.png").Any());
-            int count=0, reviewCount=0;
-            if(available)
+            using (var stream=File.Create(pendingPath))
+            using (var writer=new Utf8JsonWriter(stream,new JsonWriterOptions { Indented=true }))
             {
-                if(location=="bank" && number==0 && File.Exists(Path.Combine(session,"session.json")))
+                writer.WriteStartObject();writer.WriteStartArray("items");
+                foreach(var tab in tabs)
                 {
-                    using var metadata=JsonDocument.Parse(File.ReadAllText(Path.Combine(session,"session.json")));
-                    if(metadata.RootElement.TryGetProperty("ActiveTab",out var actual) && actual.ValueKind==JsonValueKind.Number && actual.TryGetInt32(out int detected)
-                        && detected>=1 && detected<=BankGeometry.TabCount)number=detected;
+                    token.ThrowIfCancellationRequested();
+                    int number=tab.GetProperty("Tab").GetInt32();
+                    string location=tab.TryGetProperty("LocationType",out var kind) ? kind.GetString() ?? "bank" : "bank";
+                    if(location is not ("bank" or "equipped" or "inventory"))throw new InvalidDataException("Unknown scan location.");
+                    if(location=="bank" && (number<0 || number>BankGeometry.TabCount))throw new InvalidOperationException("Invalid tab number in batch.json.");
+                    string name=location=="bank" ? (number>0 ? $"tab-{number:00}" : "tab") : location,session=Path.Combine(folder,name);
+                    string status=tab.GetProperty("Status").GetString() ?? "unknown";
+                    bool available=Directory.Exists(session) && (File.Exists(Path.Combine(session,"session.json")) || Directory.EnumerateFiles(session,"r??_c??.png").Any());
+                    int count=0, reviewCount=0;
+                    if(available)
+                    {
+                        if(location=="bank" && number==0 && File.Exists(Path.Combine(session,"session.json")))
+                        {
+                            using var metadata=JsonDocument.Parse(File.ReadAllText(Path.Combine(session,"session.json")));
+                            if(metadata.RootElement.TryGetProperty("ActiveTab",out var actual) && actual.ValueKind==JsonValueKind.Number && actual.TryGetInt32(out int detected)
+                                && detected>=1 && detected<=BankGeometry.TabCount)number=detected;
+                        }
+                        log($"OCR: {name}");
+                        recognizeTab(session);
+                        using var input=File.OpenRead(CompactExport.FullReportPath(session));
+                        using var data=JsonDocument.Parse(input);
+                        foreach(var row in data.RootElement.GetProperty("items").EnumerateArray())
+                        {
+                            token.ThrowIfCancellationRequested();
+                            int? itemTab=location=="bank" && number>0 ? number : null;
+                            writer.WriteStartObject();
+                            foreach(var property in row.EnumerateObject())
+                                if(property.Name is not ("tab" or "location_type" or "file"))property.WriteTo(writer);
+                            if(itemTab is { } detectedTab)writer.WriteNumber("tab",detectedTab);else writer.WriteNull("tab");
+                            writer.WriteString("location_type",location);
+                            writer.WriteString("file",name+"/"+row.GetProperty("file").GetString());
+                            writer.WriteEndObject();
+                            var projectedRow=JsonSerializer.SerializeToElement(new
+                            {
+                                file=name+"/"+row.GetProperty("file").GetString(), tab=itemTab, location_type=location,
+                                item=row.TryGetProperty("item",out var item) ? (JsonElement?)item : null
+                            });
+                            var compact=CompactExport.Project(projectedRow,itemTab,location);
+                            compactItems.Add(compact);count++;itemCount++;
+                            // Older reports without a per-item status still require review.
+                            if(!row.TryGetProperty("status",out var itemStatus) || itemStatus.GetString() != "recognized")reviewCount++;
+                        }
+                        writer.Flush();
+                        links.Add($"<li><a href='{name}/report.html'>{name}</a>: {count} items; capture status: {WebUtility.HtmlEncode(status)}</li>");
+                    }
+                    else links.Add($"<li>{name}: no captures; capture status: {WebUtility.HtmlEncode(status)}</li>");
+                    summaries.Add(new JsonObject { ["tab"]=number,["location_type"]=location,["capture_status"]=status,["items"]=count,["review_items"]=reviewCount,
+                        ["recognition_status"]=available ? reviewCount > 0 ? "needs_visual_review" : "recognized" : "not_scanned" });
                 }
-                log($"OCR: {name}");
-                recognizeTab(session);
-                var data=JsonNode.Parse(File.ReadAllText(CompactExport.FullReportPath(session)))!;
-                foreach(var row in data["items"]!.AsArray())
-                {
-                    var copy=row!.DeepClone();copy["tab"]=location=="bank" && number>0 ? JsonValue.Create(number) : null;copy["location_type"]=location;
-                    copy["file"]=name+"/"+copy["file"]!.GetValue<string>();
-                    combined.Add(copy);count++;
-                    // Older reports without a per-item status still require review.
-                    if(copy["status"]?.GetValue<string>() != "recognized")reviewCount++;
-                }
-                links.Add($"<li><a href='{name}/report.html'>{name}</a>: {count} items; capture status: {WebUtility.HtmlEncode(status)}</li>");
+                token.ThrowIfCancellationRequested();
+                int totalReview=summaries.Sum(s=>s!["review_items"]!.GetValue<int>());
+                var summary=new JsonObject { ["items"]=itemCount,["tabs"]=summaries,["review_items"]=totalReview,
+                    ["status"]=totalReview > 0 ? "needs_visual_review" : "recognized",["capture_status"]=batch.RootElement.GetProperty("Status").GetString() };
+                writer.WriteEndArray();writer.WritePropertyName("summary");summary.WriteTo(writer);writer.WriteEndObject();
             }
-            else links.Add($"<li>{name}: no captures; capture status: {WebUtility.HtmlEncode(status)}</li>");
-            summaries.Add(new JsonObject { ["tab"]=number,["location_type"]=location,["capture_status"]=status,["items"]=count,["review_items"]=reviewCount,
-                ["recognition_status"]=available ? reviewCount > 0 ? "needs_visual_review" : "recognized" : "not_scanned" });
+            File.Move(pendingPath,fullPath,overwrite:true);
         }
-        token.ThrowIfCancellationRequested();
-        int totalReview=summaries.Sum(s=>s!["review_items"]!.GetValue<int>());
-        var summary=new JsonObject { ["items"]=combined.Count,["tabs"]=summaries,["review_items"]=totalReview,
-            ["status"]=totalReview > 0 ? "needs_visual_review" : "recognized",["capture_status"]=batch.RootElement.GetProperty("Status").GetString() };
-        File.WriteAllText(Path.Combine(output,"full.json"),new JsonObject { ["summary"]=summary,["items"]=combined }.ToJsonString(new JsonSerializerOptions{WriteIndented=true}));
-        CompactExport.Write(output, combined.Select(row => JsonSerializer.SerializeToElement(row)));
+        finally { if(File.Exists(pendingPath))File.Delete(pendingPath); }
+        int totalReviewItems=summaries.Sum(s=>s!["review_items"]!.GetValue<int>());
+        CompactExport.WriteItems(output,compactItems);
         string report=Path.Combine(output,"report.html");
-        File.WriteAllText(report,"<!doctype html><html lang='en'><meta charset='utf-8'><title>FsBank — all tabs</title><style>body{font:18px system-ui;background:#14202c;color:#eee;margin:32px}a{color:#8bd0ff}li{margin:14px 0}</style><h1>Batch recognition</h1><p><a href='items.html'>Compact items</a></p><p>Total items: "+combined.Count+". Items needing review: "+totalReview+". Empty or incomplete tabs are marked separately.</p><ul>"+string.Join("",links)+"</ul></html>");
+        File.WriteAllText(report,"<!doctype html><html lang='en'><meta charset='utf-8'><title>FsBank — all tabs</title><style>body{font:18px system-ui;background:#14202c;color:#eee;margin:32px}a{color:#8bd0ff}li{margin:14px 0}</style><h1>Batch recognition</h1><p><a href='items.html'>Compact items</a></p><p>Total items: "+itemCount+". Items needing review: "+totalReviewItems+". Empty or incomplete tabs are marked separately.</p><ul>"+string.Join("",links)+"</ul></html>");
         return report;
     }
 }

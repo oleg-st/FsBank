@@ -31,6 +31,7 @@ internal static class Program
                   --verify-equipped <image> <output>
                   --verify-ocr-pipeline <sample> <output>
                   --benchmark-ocr <session> <output>
+                  --benchmark-export <saved-batch> <output>
                   --verify-header-regression <batch> <output>
                   --verify-headers <batch> <output>
                   --verify-quality <batch>
@@ -40,6 +41,12 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==3 && args[0]=="--benchmark-export")
+        {
+            try { ExportBenchmark.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==3 && args[0]=="--verify-full-review")
