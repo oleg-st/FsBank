@@ -77,6 +77,32 @@ internal sealed class Vision
         _ => throw new ArgumentOutOfRangeException(nameof(target))
     };
     public EquippedLayout? FindEquipped(Pixels frame) => (EquippedLayout?)FindCharacter(frame,ScanTarget.Equipped);
+    public ScanLayout? FindLayoutFast(Pixels frame,ScanTarget target,ScanLayout? hint=null,bool fallback=true)
+    {
+        if(hint is not null && (hint.Target==ScanTarget.Bank)==(target==ScanTarget.Bank))
+        {
+            var found=FindLayoutIn(frame,target,hint.Scale,Near(hint.Anchor,LayoutPatternSize(target,hint.Scale),hint.Scale));
+            if(found is not null)return found;
+        }
+        foreach(double scale in new[] {frame.Height/(double)GameConstants.ReferenceHeight,NativeScale}.Distinct())
+        {
+            var reference=target==ScanTarget.Bank ? ReferenceTitleAnchor : new Point(890,414);
+            var anchor=new Point((int)Math.Round(reference.X*scale),(int)Math.Round(reference.Y*scale));
+            var found=FindLayoutIn(frame,target,scale,Near(anchor,LayoutPatternSize(target,scale),scale));
+            if(found is not null)return found;
+        }
+        return fallback ? FindLayout(frame,target) : null;
+    }
+    private static Rectangle Near(Point anchor,Size pattern,double scale)
+    {
+        var area=new Rectangle(anchor,pattern);
+        int padding=(int)Math.Ceiling(32*scale);area.Inflate(padding,padding);
+        return area;
+    }
+    internal Size LayoutPatternSize(ScanTarget target,double scale) => target==ScanTarget.Bank
+        ? new(Title(scale).Width,Title(scale).Height) : EquippedPatternSize(scale);
+    internal ScanLayout? FindLayoutIn(Pixels frame,ScanTarget target,double scale,Rectangle area) => target==ScanTarget.Bank
+        ? FindBankIn(frame,scale,area) : FindCharacterIn(frame,target,scale,area);
     public EquippedLayout? FindEquippedFast(Pixels frame,bool fallback=true)
     {
         // Common position is a search hint, never an assumed layout. Validate
@@ -93,11 +119,14 @@ internal sealed class Vision
     }
     internal Size EquippedPatternSize(double scale) => new(Power(scale).Width,Power(scale).Height);
     internal EquippedLayout? FindEquippedIn(Pixels frame,double scale,Rectangle area)
+        => (EquippedLayout?)FindCharacterIn(frame,ScanTarget.Equipped,scale,area);
+    private CharacterLayout? FindCharacterIn(Pixels frame,ScanTarget target,double scale,Rectangle area)
     {
         var found=Power(scale).Find(frame,area,CharacterPatternMaxError);
         if(found is null)return null;
-        var layout=new EquippedLayout(Rectangle.Empty,found.Value.Point,scale);
-        layout=(EquippedLayout)WithCharacterGeometry(frame,layout);
+        CharacterLayout layout=target==ScanTarget.Equipped ? new EquippedLayout(Rectangle.Empty,found.Value.Point,scale)
+            : new InventoryLayout(Rectangle.Empty,found.Value.Point,scale);
+        layout=WithCharacterGeometry(frame,layout);
         return frame.Bounds.Contains(layout.Bounds) && frame.Bounds.Contains(layout.Grid) && PanelStillOpen(frame,layout) ? layout : null;
     }
     private CharacterLayout? FindCharacter(Pixels frame,ScanTarget target)
@@ -140,22 +169,28 @@ internal sealed class Vision
         double basis = frame.Height/(double)GameConstants.ReferenceHeight;
         foreach (double scale in new[] {basis,NativeScale}.Concat(RelativeScales.ToArray().Skip(1).Select(s=>basis*s)).Distinct())
         {
-            var found = Title(scale).Find(frame, frame.Bounds);
-            if (found is null) continue;
-            var point = found.Value.Point;
-            var bank = new BankLayout(new(point.X+(int)Math.Round((ReferenceBounds.X-ReferenceTitleAnchor.X)*scale),point.Y+(int)Math.Round((ReferenceBounds.Y-ReferenceTitleAnchor.Y)*scale),
-                (int)Math.Round(ReferenceBounds.Width*scale),(int)Math.Round(ReferenceBounds.Height*scale)), point,scale);
-            if (!frame.Bounds.Contains(bank.Bounds) || !frame.Bounds.Contains(bank.Cell(Rows-1,Columns-1))) continue;
-            // Independent geometry check: repeated vertical tab separators must exist.
-            int valid=0;
-            for (int col=0; col<TabCount; col++)
-            {
-                int x=bank.Tabs.Left+(int)Math.Round((TabBorderProbe.X+col*TabPitchPx)*scale);
-                int y=bank.Tabs.Top+(int)Math.Round(TabBorderProbe.Y*scale);
-                if (frame.Bright(x,y)>TabBorderBrightness) valid++;
-            }
-            if(valid>=MinimumTabBorders) return bank;
+            var bank=FindBankIn(frame,scale,frame.Bounds);
+            if(bank is not null)return bank;
         }
+        return null;
+    }
+    private BankLayout? FindBankIn(Pixels frame,double scale,Rectangle area)
+    {
+        var found = Title(scale).Find(frame, area);
+        if (found is null) return null;
+        var point = found.Value.Point;
+        var bank = new BankLayout(new(point.X+(int)Math.Round((ReferenceBounds.X-ReferenceTitleAnchor.X)*scale),point.Y+(int)Math.Round((ReferenceBounds.Y-ReferenceTitleAnchor.Y)*scale),
+            (int)Math.Round(ReferenceBounds.Width*scale),(int)Math.Round(ReferenceBounds.Height*scale)), point,scale);
+        if (!frame.Bounds.Contains(bank.Bounds) || !frame.Bounds.Contains(bank.Cell(Rows-1,Columns-1))) return null;
+        // Independent geometry check: repeated vertical tab separators must exist.
+        int valid=0;
+        for (int col=0; col<TabCount; col++)
+        {
+            int x=bank.Tabs.Left+(int)Math.Round((TabBorderProbe.X+col*TabPitchPx)*scale);
+            int y=bank.Tabs.Top+(int)Math.Round(TabBorderProbe.Y*scale);
+            if (frame.Bright(x,y)>TabBorderBrightness) valid++;
+        }
+        if(valid>=MinimumTabBorders) return bank;
         return null;
     }
     public bool PanelStillOpen(Pixels frame,ScanLayout layout)

@@ -1,6 +1,7 @@
 using FsBank.Scanner.Export;
 using FsBank.Scanner.Game;
 using FsBank.Scanner.Imaging;
+using FsBank.Scanner.Scanning;
 using FsBank.Scanner.Scanning.Manual;
 
 using System.Text.Json;
@@ -20,6 +21,14 @@ internal static class EquippedCheck
         Require(vision.PanelStillOpen(pixels,layout),"Detected panel fails tracking");
         var inventory=(InventoryLayout?)vision.FindLayout(pixels,ScanTarget.Inventory);
         Require(inventory is not null && inventory.Anchor==layout.Anchor && inventory.ContentOffsetX==layout.ContentOffsetX,"Inventory geometry differs");
+        var search=new PanelSearch(new Vision());
+        Require(search.Find(pixels,ScanTarget.Equipped)==layout,"Auto startup changed equipment geometry");
+        Require(search.Find(pixels,ScanTarget.Inventory)==inventory,"Auto transition changed inventory geometry");
+        Require(new PanelSearch(new Vision()).Find(pixels,ScanTarget.Inventory)==inventory,"Inventory-only startup changed geometry");
+        // A previous frame's scrollbar state must never override the current frame.
+        var stale=layout with {ContentOffsetX=layout.ContentOffsetX==0 ? 16 : 0};
+        Require(vision.FindLayoutFast(pixels,ScanTarget.Equipped,stale)==layout,"Cached hint retained a stale scrollbar offset");
+        Require(vision.FindLayoutFast(pixels,ScanTarget.Inventory,stale)==inventory,"Inventory retained a stale scrollbar offset");
         Require(layout.Slots().All(s=>Vision.Occupied(pixels,s.Bounds)),"Missed occupied equipment slot");
         var negative=pixels.Crop(pixels.Bounds);
         var markers=layout.Relative(new Rectangle(-4,-4,108,104));
@@ -29,10 +38,14 @@ internal static class EquippedCheck
         using var annotated=pixels.Bitmap();
         using(var g=Graphics.FromImage(annotated))
         using(var pen=new Pen(Color.Lime,2))
+        {
             foreach(var slot in layout.Slots())g.DrawRectangle(pen,slot.Bounds);
+            pen.Color=Color.Cyan;
+            foreach(var slot in inventory!.Slots())g.DrawRectangle(pen,slot.Bounds);
+        }
         annotated.Save(Path.Combine(output,"slots.png"));
         File.WriteAllText(Path.Combine(output,"layout.json"),JsonSerializer.Serialize(layout));
-        File.WriteAllText(Path.Combine(output,"checks.txt"),"Passed: full/fast detection, panel tracking, 14 occupied slots, inventory geometry, missing-heading and blank-frame rejection. No live game input.");
+        File.WriteAllText(Path.Combine(output,"checks.txt"),"Passed: full/fast detection, auto startup and equipped-to-inventory transition, stale scrollbar hint, panel tracking, 14 occupied slots, inventory geometry, missing-heading and blank-frame rejection. No live game input.");
     }
     public static void Run(string reference, string output)
     {

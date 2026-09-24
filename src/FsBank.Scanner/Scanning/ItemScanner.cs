@@ -25,6 +25,8 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         private DesktopCapture? capture;
         private Rectangle client;
         public Vision Vision { get; } = new();
+        private PanelSearch? panels;
+        public PanelSearch Panels => panels ??= new(Vision);
         public Point? ExpectedCursor { get; set; }
         public DesktopCapture Get(Rectangle bounds)
         {
@@ -138,12 +140,13 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         var initial=Next(capture,client,token,Stopwatch.GetTimestamp());
         double initialFrameMs=stage.Elapsed.TotalMilliseconds;
         stage.Restart();
-        var fullLayout=vision.FindLayout(initial,target);
+        ScanLayout? fullLayout;
         if(progress is not null)
         {
-            fullLayout=ScanPreparation.WaitForPanel(hwnd,client,target,vision,()=>Next(capture,client,token,Stopwatch.GetTimestamp()),progress,token);
+            fullLayout=ScanPreparation.WaitForPanel(hwnd,client,target,context.Panels,()=>Next(capture,client,token,Stopwatch.GetTimestamp()),progress,token,initial);
             context.ExpectedCursor=null;
         }
+        else fullLayout=vision.FindLayoutFast(initial,target);
         while(progress is null && fullLayout is null && !restoreCursor && stage.ElapsedMilliseconds<TooltipClearTimeoutMs)
         {
             token.ThrowIfCancellationRequested();
@@ -153,7 +156,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                 throw new OperationCanceledException("Focus or mouse changed while waiting for the next panel.");
             if(token.WaitHandle.WaitOne(ActivationPollMs))token.ThrowIfCancellationRequested();
             initial=Next(capture,client,token,Stopwatch.GetTimestamp());
-            fullLayout=vision.FindLayout(initial,target);
+            fullLayout=vision.FindLayoutFast(initial,target);
         }
         double panelSearchMs=stage.Elapsed.TotalMilliseconds;
         if(fullLayout is null)
@@ -245,16 +248,16 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         Directory.CreateDirectory(session);
         ocr?.Register(session);
         var results=new List<CellResult>();
-        var queue=Channel.CreateBounded<(Pixels Pixels,string Path)>(new BoundedChannelOptions(SaveQueueCapacity){SingleReader=true,SingleWriter=true,FullMode=BoundedChannelFullMode.Wait});
+        var queue=Channel.CreateBounded<(Pixels Pixels,string Path,bool Recognize)>(new BoundedChannelOptions(SaveQueueCapacity){SingleReader=true,SingleWriter=true,FullMode=BoundedChannelFullMode.Wait});
         var saver=Task.Run(async()=>
         {
-            try {await foreach(var item in queue.Reader.ReadAllAsync()) { item.Pixels.Save(item.Path); ocr?.Enqueue(item.Path); }}
+            try {await foreach(var item in queue.Reader.ReadAllAsync()) { item.Pixels.Save(item.Path); if(item.Recognize)ocr?.Enqueue(item.Path); }}
             catch(Exception e){queue.Writer.TryComplete(e);throw;}
         });
         var total=Stopwatch.StartNew(); string status="completed";string? error=null;
         object? panelValidationFailure=null;
         int? activeTab=null;
-        double selectionMs=0,readyMs=0;
+        double selectionMs=0,readyMs=0,clearMs=0;
         try
         {
             Move(layout.Park);Thread.Sleep(InitialParkMs);Check();
@@ -265,6 +268,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                 if(vision.FindTooltip(baseline,layout.Scale) is null)break;
                 if(clearWatch.ElapsedMilliseconds>TooltipClearTimeoutMs)throw new InvalidOperationException("Failed to dismiss the initial tooltip.");
             }while(true);
+            clearMs=clearWatch.Elapsed.TotalMilliseconds;
             baseline=baseline.Crop(baseline.Bounds);
             if(!vision.PanelStillOpen(baseline,layout))throw new InvalidOperationException("The scanned panel was closed.");
             activeTab=CurrentTab(baseline);
@@ -348,7 +352,8 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                 log($"Confirmed tab {activeTab+1}/{TabCount}; grid stable; selection and verification took {tabPreparation.ElapsedMilliseconds} ms, clicks {clickAttempts}.");
                 selectionMs=tabPreparation.Elapsed.TotalMilliseconds;
             }
-            baseline.Save(Path.Combine(session,"baseline.png"));
+            // Baseline owns its buffer and stays immutable while the saver writes it.
+            queue.Writer.WriteAsync((baseline,Path.Combine(session,"baseline.png"),false),token).AsTask().GetAwaiter().GetResult();
             progress?.RegisterSession(session,target,activeTab+1);
             progress?.Scanning(target);
             var cells=layout.Slots().Select(slot=>(slot.Row,slot.Col,Occupied:Vision.Occupied(baseline,slot.Bounds))).ToArray();
@@ -358,7 +363,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
             HoldAlt();
             log("Left Alt is held: capturing detailed tooltips.");
             readyMs=preparation.Elapsed.TotalMilliseconds;
-            log($"Panel ready in {readyMs:F0} ms: capture setup {captureSetupMs:F0}, first frame {initialFrameMs:F0}, panel search {panelSearchMs:F0}, selection {selectionMs:F0}, other preparation {readyMs-captureSetupMs-initialFrameMs-panelSearchMs-selectionMs:F0} ms.");
+            log($"Panel ready in {readyMs:F0} ms: capture setup {captureSetupMs:F0}, first frame {initialFrameMs:F0}, panel search {panelSearchMs:F0}, tooltip clear {clearMs:F0}, selection {selectionMs:F0}, other preparation {readyMs-captureSetupMs-initialFrameMs-panelSearchMs-clearMs-selectionMs:F0} ms.");
             Tooltip? previous=null;
             foreach(var cell in cells)
             {
@@ -495,7 +500,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                             string filename=$"r{cell.Row+1:00}_c{cell.Col+1:00}.png";
                             Check();
                             long queueStart=Stopwatch.GetTimestamp();
-                            queue.Writer.WriteAsync((crop,Path.Combine(session,filename)),token).AsTask().GetAwaiter().GetResult();
+                            queue.Writer.WriteAsync((crop,Path.Combine(session,filename),true),token).AsTask().GetAwaiter().GetResult();
                             timing.QueueWaitMs=Stopwatch.GetElapsedTime(queueStart).TotalMilliseconds;
                             timing.TotalMs=cycle.Elapsed.TotalMilliseconds;timing.Frames=capture.Frames-startFrames;
                             results.Add(new(cell.Row+1,cell.Col+1,"captured",filename,found.Bounds,watch.Elapsed.TotalMilliseconds,timing));
@@ -556,7 +561,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                 {
                     LocationType=layout.LocationType,Status=status,Error=error,Build=BuildInfo.Configuration,GameClient=client,CaptureRegion=region,Layout=layout,Bank=layout as BankLayout,ElapsedMs=total.ElapsedMilliseconds,
                     CaptureFrames=capture.Frames-initialFrames,Cells=results,PanelValidationFailure=panelValidationFailure,Note="Tooltip rectangles are relative to CaptureRegion; rows and columns are 1-based; clicks only on bank tab buttons.",
-                    Preparation=new {ReadyMs=readyMs,CaptureSetupMs=captureSetupMs,InitialFrameMs=initialFrameMs,PanelSearchMs=panelSearchMs,SelectionMs=selectionMs},
+                    Preparation=new {ReadyMs=readyMs,CaptureSetupMs=captureSetupMs,InitialFrameMs=initialFrameMs,PanelSearchMs=panelSearchMs,TooltipClearMs=clearMs,SelectionMs=selectionMs},
                     TooltipMode="alt_details",DetailsKey="LeftAlt",AltPressed=altPressed,AltReleased=altReleased,InitialHoverDelayMs=hoverMs
                     ,ActiveTab=activeTab+1,RequestedTab=targetTab+1
                 },new JsonSerializerOptions{WriteIndented=true}));

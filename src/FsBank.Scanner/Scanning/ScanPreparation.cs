@@ -47,8 +47,8 @@ internal static class ScanPreparation
     }
 
     // No synthetic input is held or sent here. User input is expected while opening panels.
-    public static ScanLayout WaitForPanel(nint game,Rectangle client,ScanTarget target,Vision vision,
-        Func<Pixels> read,ScanProgressTracker progress,CancellationToken token)
+    public static ScanLayout WaitForPanel(nint game,Rectangle client,ScanTarget target,PanelSearch search,
+        Func<Pixels> read,ScanProgressTracker progress,CancellationToken token,Pixels? initial=null)
     {
         while(true)
         {
@@ -57,15 +57,17 @@ internal static class ScanPreparation
             if(Native.GetForegroundWindow()!=game)
             {
                 progress.Waiting(target,"Switch to Fellowship to continue.");
+                initial=null;
                 Wait(token);continue;
             }
-            var layout=vision.FindLayout(read(),target);
+            var layout=search.Find(initial ?? read(),target);
+            initial=null;
             if(layout is null)
             {
                 progress.Waiting(target,target==ScanTarget.Bank
                     ? "Bank not detected. Open your stash to continue."
                     : "Character panel not detected. Open it to continue.");
-                Wait(token);continue;
+                Wait(token,10);continue;
             }
             bool held=new[]{Keys.LButton,Keys.RButton,Keys.Menu}.Any(key=>(Native.GetAsyncKeyState((int)key)&Native.KeyDownMask)!=0);
             // Start on the first usable frame. Capture already handles mouse movement

@@ -27,6 +27,7 @@ internal static class Program
                   --verify-character-panel <image> <output>
                   --verify-tooltip-edge <crop> <output.json>
                   --verify-manual-startup <image> <output>
+                  --verify-auto-preparation <saved-batch> <output>
                   --verify-manual-speed <session> <output>
                   --verify-equipped <image> <output>
                   --verify-ocr-pipeline <sample> <output>
@@ -107,6 +108,12 @@ internal static class Program
         {
             try { VisionBenchmark.EdgeRegression(args[1],args[2]); }
             catch(Exception e) { File.WriteAllText(args[2]+".error",e.ToString());Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-auto-preparation")
+        {
+            try { AutoPreparationCheck.Run(args[1],args[2]); }
+            catch(Exception e) { Console.Error.WriteLine(e);Environment.ExitCode=1; }
             return;
         }
         if(args.Length==3 && args[0]=="--verify-manual-startup")
