@@ -16,6 +16,8 @@ internal static class TooltipParser
         int remainingTraits = 0;
         ModifierBlock? block = null;
         HashSet<int> informationalLines = [];
+        HashSet<int> nameLines = [];
+        List<int> unrecognizedNameLines = [];
         // The top ornament can be segmented before the first title line. Use
         // the actual title's height so uppercase border noise never joins Name.
         int headerTitleHeight=lines.TakeWhile(l=>!Regex.IsMatch(l.Text,@"\b(Back|Head|Hands|Shoulders|Chest|Legs|Feet|Waist|Wrists?|Necklace|Ring|Relic|Weapon|Off-Hand)\b.*?\b\d+\s*$")
@@ -55,6 +57,7 @@ internal static class TooltipParser
                 // Imbued Traits are intentionally omitted from the compact export.
                 // Recognize them separately, retaining source line references for diagnostics.
                 // Limit this to the displayed count so unrelated unknown text still warns.
+                informationalLines.Add(line.Index);
                 string traitName = Regex.Replace(text, @"^\s*(?:[ULI|]{1,2}\s+|[└├│─┗┣┃━]+\s*)", "").Trim();
                 if (Regex.IsMatch(traitName, @"^[A-Za-z][A-Za-z '\-]+$"))
                 {
@@ -125,32 +128,46 @@ internal static class TooltipParser
                     { result.MetadataLines.Add(text); informationalLines.Add(line.Index); continue; }
                     nameLineHeight = Math.Max(nameLineHeight, line.Box.Height);
                     nameBottom = line.Box.Bottom;
+                    nameLines.Add(line.Index);
                     // OCR can split one possessive apostrophe into curly + straight.
                     text = Regex.Replace(text, @"(?<=[A-Z])'{2,}(?=S\b)", "'");
                     // A title wrapped after a hyphen continues the same compound word.
                     result.Name = result.Name is null ? text : result.Name + (result.Name.EndsWith('-') ? "" : " ") + text;
                 }
-                else result.MetadataLines.Add(text);
+                else
+                {
+                    result.MetadataLines.Add(text);
+                    // Unknown title text can silently truncate an otherwise valid Name.
+                    if (result.Slot is null) unrecognizedNameLines.Add(line.Index);
+                }
             }
             else if (text is "The item's potential power; derived from its" or "Item Level, Rarity, and the Modifiers it has.")
             { result.ExplanationLines.Add(line.Index); informationalLines.Add(line.Index); }
             else result.UnparsedLines.Add(line.Index);
         }
         if (result.Name is null) result.Warn("Name not recognized");
-        if (!footer) result.Warn("Footer not recognized; capture may be incomplete");
+        if (!footer) result.Warn("Footer not recognized; capture may be incomplete", needsReview:false);
         if (result.Stats.Count == 0) result.Warn("No stats recognized");
-        if (result.Slot is null || result.ItemLevel is null || result.Rarity is null || result.PowerPotential is null) result.Warn("Incomplete item metadata");
-        if (result.Rarity is not null && result.Temperable is null) result.Warn("Tempering not recognized; inspect source line");
+        if (result.Slot is null) result.Warn("Item slot not recognized");
+        if (result.ItemLevel is null) result.Warn("Item level not recognized");
+        if (result.Rarity is null) result.Warn("Rarity not recognized");
+        if (result.PowerPotential is null) result.Warn("Power potential not recognized", needsReview:false);
+        if (result.Temperable is null) result.Warn("Tempering not recognized; inspect source line");
+        if (result.Stats.Any(s => s.Origin == "unresolved")) result.Warn("Stat origin not recognized");
         if (result.Modifiers.Any(m => m.Kind == "unresolved")) result.Warn("Unresolved modifier block");
+        if (unrecognizedNameLines.Count > 0) result.Warn("Unrecognized item name text in lines " + string.Join(", ", unrecognizedNameLines));
         if (result.UnparsedLines.Count != 0) result.Warn("Additional text retained in UnparsedLines; inspect source lines",
             result.UnparsedLines.Any(index=>!informationalLines.Contains(index)));
         var uncertain=lines.Where(l => l.Confidence < 60 || l.Text.Length == 0).ToArray();
-        if (uncertain.Length>0) result.Warn("Low confidence or empty text in a detected line",
-            uncertain.Any(l=>!informationalLines.Contains(l.Index) && (l.Text.Length==0 || (l.VerifiedConfidence ?? l.Confidence)<60)));
+        // Structured fields are assessed by the values we extracted, not OCR's
+        // confidence in their source words. Free-form item names have no such check.
+        if (uncertain.Length>0) result.Warn("Low confidence or empty text in a detected line", needsReview:false);
+        foreach (var line in lines.Where(l => nameLines.Contains(l.Index) && (l.VerifiedConfidence ?? l.Confidence) < 60))
+            result.Warn($"Low confidence in item name in line {line.Index}");
         foreach (var line in lines.Where(l => Regex.IsMatch(l.Text, @"\([^()\[\]]*\]|\[[^()\[\]]*\)")))
-            result.Warn($"Mismatched brackets in line {line.Index}: visual review required",!informationalLines.Contains(line.Index));
+            result.Warn($"Mismatched brackets in line {line.Index}: visual review required",nameLines.Contains(line.Index));
         foreach(var line in lines.Where(l=>Regex.IsMatch(l.Text,@"\([A-Z]{3,}\)")))
-            result.Warn($"Parenthesized uppercase token in line {line.Index}: verify bracket shape",!informationalLines.Contains(line.Index));
+            result.Warn($"Parenthesized uppercase token in line {line.Index}: verify bracket shape",nameLines.Contains(line.Index));
         if (result.Name is not null && (result.Name.Contains("''") || Regex.IsMatch(result.Name, "'S[A-Z]{2,}"))) result.Warn("Suspicious name spacing/punctuation");
         return result;
     }

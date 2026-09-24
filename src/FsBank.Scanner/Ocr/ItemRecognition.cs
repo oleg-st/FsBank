@@ -76,7 +76,8 @@ internal static class ItemRecognition
             annotated.Save(Path.Combine(output, name + "-lines.png"));
         }
         var data = new { file = Path.GetFileName(file), sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))),
-            status = captureHeaderComplete && captureLayoutComplete ? "needs_visual_review" : "rescan_required", captureHeaderComplete, captureLayoutComplete, lines, item };
+            status = !captureHeaderComplete || !captureLayoutComplete ? "rescan_required" : item.ReviewWarnings.Count > 0 ? "needs_visual_review" : "recognized",
+            reviewWarnings = item.ReviewWarnings, captureHeaderComplete, captureLayoutComplete, lines, item };
         cards.Append($"<article><h2>{name}</h2><div class='pair'><img src='{name}-lines.png' alt='Detected lines'><img src='data:image/png;base64,{Convert.ToBase64String(File.ReadAllBytes(file))}' alt='Source'></div><pre>{WebUtility.HtmlEncode(JsonSerializer.Serialize(item, JsonOptions))}</pre><table><tr><th>Line</th><th>Color</th><th>Confidence</th><th>Raw text</th></tr>");
         foreach (var line in lines) cards.Append($"<tr><td>{line.Index}</td><td>{line.Color}</td><td>{line.Confidence}</td><td>{WebUtility.HtmlEncode(line.Text)}"
             + (line.Corrections.Count > 0 ? $"<details><summary>OCR corrections: {line.Corrections.Count}</summary>Raw OCR: {WebUtility.HtmlEncode(line.RawText)}<br>{WebUtility.HtmlEncode(JsonSerializer.Serialize(line.Corrections))}</details>" : "") + "</td></tr>");
@@ -95,13 +96,15 @@ internal static class ItemRecognition
         var items = ordered.Select(r => r.Data).ToList();
         var cards = new StringBuilder(string.Concat(ordered.Select(r => r.Card)));
         int lineCount = ordered.Sum(r => r.Lines);
+        int reviewCount = ordered.Count(r => r.Issue is not null);
         var summary = new { items = items.Count, lines = lineCount, seconds = seconds,
-            engine = "Tesseract native / title 2x, detail 3x / contrast + padding / measured gaps / DAWG dictionaries disabled", status = "needs_visual_review",
+            engine = "Tesseract native / title 2x, detail 3x / contrast + padding / measured gaps / DAWG dictionaries disabled",
+            reviewItems = reviewCount, status = reviewCount > 0 ? "needs_visual_review" : "recognized",
             scope = "Alt tooltip prototype. Modifier descriptions retained verbatim; not schema v2. No font atlas yet." };
         File.WriteAllText(Path.Combine(output, "full.json"), JsonSerializer.Serialize(new { summary, items }, JsonOptions));
         CompactExport.Write(output, items.Select(item => JsonSerializer.SerializeToElement(item)));
         string report = Path.Combine(output, "report.html");
-        File.WriteAllText(report, "<!doctype html><meta charset='utf-8'><title>FsBank — C# OCR</title><style>body{background:#141c25;color:#eee;font:15px system-ui;margin:24px}article{border-top:1px solid #789;padding:20px 0}img{max-width:45%;object-fit:contain;align-self:start}.pair{display:flex;gap:20px}td,th{text-align:left;padding:4px 12px;border-bottom:1px solid #456}pre{white-space:pre-wrap}</style><h1>Alt tooltip recognition — C#</h1><p><a href='items.html'>Compact items</a></p><p>All results require visual review. Green rectangles show detected lines. Confidence is not a correctness guarantee.</p><pre>" + WebUtility.HtmlEncode(JsonSerializer.Serialize(summary, JsonOptions)) + "</pre>" + cards);
+        File.WriteAllText(report, "<!doctype html><meta charset='utf-8'><title>FsBank — C# OCR</title><style>body{background:#141c25;color:#eee;font:15px system-ui;margin:24px}article{border-top:1px solid #789;padding:20px 0}img{max-width:45%;object-fit:contain;align-self:start}.pair{display:flex;gap:20px}td,th{text-align:left;padding:4px 12px;border-bottom:1px solid #456}pre{white-space:pre-wrap}</style><h1>Alt tooltip recognition — C#</h1><p><a href='items.html'>Compact items</a></p><p>Items needing review: " + reviewCount + ". Review warnings concern exported data or incomplete captures. Raw OCR diagnostics are retained below.</p><pre>" + WebUtility.HtmlEncode(JsonSerializer.Serialize(summary, JsonOptions)) + "</pre>" + cards);
         log($"Done: {items.Count} items in {seconds:F1} s.");
         return report;
     }
