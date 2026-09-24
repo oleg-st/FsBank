@@ -2,6 +2,8 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.Text.Json;
 using FsBank.Scanner.Game;
+using FsBank.Scanner.Items;
+using FsBank.Scanner.Imaging;
 using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning;
 using FsBank.Scanner.Scanning.Batch;
@@ -14,11 +16,80 @@ internal static class ScanUiCheck
     public static void Run(string output)
     {
         Directory.CreateDirectory(output);
-        Progress(output);Selection(output);CancelledStart(output);OcrFailures(output);Render(output);
-        File.WriteAllText(Path.Combine(output,"checks.txt"),"Passed: asynchronous per-area progress, duplicate callbacks, cross-tab identity, waiting/cancellation, selected-area and current-tab exports, timestamp-only folder names, cancelled Auto/Manual start without input, real OCR queue error routing/drain, manual restrictions and restored Auto selection, diagnostic checkbox defaults, Result tab creation/reuse, preserved tab selection during updates, layout fit at default/minimum size with expanded journal. UI previews rendered without game input.");
+        Progress(output);RecognitionWarnings();HeaderSegmentation();Selection(output);CancelledStart(output);OcrFailures(output);Render(output);
+        File.WriteAllText(Path.Combine(output,"checks.txt"),"Passed: diagnostic-only prose warnings versus actionable item warnings, single-surface overlay updates without child handles, asynchronous per-area progress, duplicate callbacks, cross-tab identity, waiting/cancellation, selected-area and current-tab exports, timestamp-only folder names, cancelled Auto/Manual start without input, real OCR queue error routing/drain, manual restrictions and restored Auto selection, diagnostic checkbox defaults, Result tab creation/reuse, preserved tab selection during updates, layout fit at default/minimum size with expanded journal. UI previews rendered without game input.");
         Console.WriteLine("Scan UI checks passed: "+output);
     }
     private static void Require(bool condition,string message) { if(!condition)throw new InvalidOperationException(message); }
+    private static void HeaderSegmentation()
+    {
+        var pixels=new Pixels(280,150);
+        void Ink(int x,int y)
+        {
+            int i=pixels.Offset(x,y);pixels.Data[i]=pixels.Data[i+1]=pixels.Data[i+2]=200;
+        }
+        // Disconnected decorative strokes: together they span the header.
+        for(int piece=0;piece<3;piece++)for(int x=0;x<70;x++)Ink(18+piece*80+x,10+x/7);
+        // Separate, full-height glyphs spanning the same width must survive.
+        for(int letter=0;letter<12;letter++)for(int x=0;x<10;x++)for(int y=30;y<44;y++)Ink(20+letter*20+x,y);
+        // A short horizontal fragment alone is insufficient evidence of a border.
+        for(int x=0;x<35;x++)for(int y=60;y<67;y++)Ink(30+x,y);
+        var raw=TooltipSegmenter.Find(pixels);
+        var filtered=TooltipSegmenter.Find(pixels,excludeHeaderDecoration:true);
+        Require(raw.Count==3 && filtered.Count==2 && filtered.All(b=>b.Box.Top>=29)
+            && filtered[0].Box==raw[1].Box && filtered[1].Box==raw[2].Box,
+            "Header decoration filtering removed real glyphs or missed disconnected border strokes.");
+    }
+    private static void RecognitionWarnings()
+    {
+        RecognizedLine L(int index,string text,int confidence=99)=>new(index,new(1,index*20,300,16),"white",text,confidence);
+        RecognizedLine[] lines=[L(0,"EXAMPLE ROBE"),L(1,"Chest 315"),L(2,"Rare Non Temperable"),
+            L(3,"Power Potential 420"),L(4,"+5 Intellect"),L(5,"The item's potential power; derived from its",40),
+            L(6,"ITEM MODIFIER (Slot: 1)"),L(7,"Blessing: The Wayfarer +1"),
+            L(8,"(CORE]ability used. Abilities with no",40),L(9,"Each (CORE) ability grants haste."),
+            L(10,"Left Alt - Show Details",40)];
+        var item=TooltipParser.Parse(lines);
+        Require(item.Warnings.Count==3 && item.ReviewWarnings.Count==0 && item.Modifiers.Single().Name=="The Wayfarer",
+            "Diagnostic-only description/footer warnings became scan issues or lost their evidence.");
+        foreach(int index in new[]{0,1,2,4,7})
+        {
+            var uncertain=lines.Select(line=>line.Index==index ? line with { Confidence=40 } : line).ToArray();
+            Require(TooltipParser.Parse(uncertain).ReviewWarnings.Any(w=>w.StartsWith("Low confidence")),
+                $"Low confidence in an exported field was hidden: {index}.");
+        }
+        var unresolved=TooltipParser.Parse(lines.Select(line=>line.Index==7 ? line with { Text="Unknown modifier" } : line).ToArray());
+        Require(unresolved.ReviewWarnings.Contains("Unresolved modifier block") && unresolved.ReviewWarnings.Any(w=>w.StartsWith("Mismatched brackets")),
+            "An unresolved modifier was incorrectly treated as harmless prose.");
+        var missing=TooltipParser.Parse(lines.Where(line=>line.Index!=1 && line.Index!=10).ToArray());
+        Require(missing.ReviewWarnings.Contains("Incomplete item metadata") && missing.ReviewWarnings.Any(w=>w.StartsWith("Footer not recognized")),
+            "Missing item fields or capture footer no longer require review.");
+        var unparsed=TooltipParser.Parse(lines.Select(line=>line.Index==5 ? line with { Text="+?? Haste" } : line).ToArray());
+        Require(unparsed.ReviewWarnings.Any(w=>w.StartsWith("Additional text")),"An unreadable stat was hidden.");
+
+        var traits=TooltipParser.Parse(lines[..5].Concat(new[]{L(5,"<} Imbued Traits (2/2)"),L(6,"UL The Mountain"),
+            L(7,"L The Dragon"),L(8,"ITEM MODIFIER (Slot: 1)"),L(9,"Blessing: The Wayfarer +1"),L(10,"Left Alt - Show Details")}).ToArray());
+        Require(traits.ReviewWarnings.Count==0 && traits.UnparsedLines.Count==0
+            && traits.ImbuedTraits.SequenceEqual(new[]{new RecognizedImbuedTrait("The Mountain",6),new RecognizedImbuedTrait("The Dragon",7)})
+            && traits.MetadataLines.Contains("<} Imbued Traits (2/2)") && traits.Modifiers.Single().Kind=="blessing",
+            "Imbued traits were not structured separately or swallowed the next modifier.");
+        var compactTraits=FsBank.Scanner.Export.CompactExport.Project(JsonSerializer.SerializeToElement(new { file="r01_c01.png",item=traits }),null,"equipped");
+        Require(compactTraits["mods"]!.AsArray().Count==1 && !compactTraits.ContainsKey("ImbuedTraits")
+            && !compactTraits.ToJsonString().Contains("The Mountain"),"Imbued traits leaked into compact export.");
+        var uncertainTrait=TooltipParser.Parse(lines[..5].Concat(new[]{L(5,"Imbued Traits (1/1)"),L(6,"L The Mountain",40),L(7,"Left Alt - Show Details")}).ToArray());
+        Require(uncertainTrait.ReviewWarnings.Count==0 && uncertainTrait.Warnings.Count>0,"Unexported imbued trait names raised issues or lost diagnostics.");
+        var unknownAfterTraits=TooltipParser.Parse(lines[..5].Concat(new[]{L(5,"Imbued Traits (1/1)"),L(6,"L The Mountain"),L(7,"Unknown stat"),L(8,"Left Alt - Show Details")}).ToArray());
+        Require(unknownAfterTraits.ReviewWarnings.Any(w=>w.StartsWith("Additional text")),"Imbued trait filtering hid unrelated text after the list.");
+        var ornament=TooltipParser.Parse(new[]{L(0,"EXAMPLE ROBE"),new RecognizedLine(11,new(30,18,160,9),"mixed","eee",28)}.Concat(lines[1..]).ToArray());
+        Require(ornament.ReviewWarnings.Count==0 && ornament.MetadataLines.Contains("eee"),"Title ornament produced a false issue.");
+        var unknown=TooltipParser.Parse(new[]{L(0,"EXAMPLE ROBE"),L(11,"eee",28)}.Concat(lines[1..]).ToArray());
+        Require(unknown.ReviewWarnings.Any(w=>w.StartsWith("Low confidence")),"Normal-sized unknown text was mistaken for a title ornament.");
+        var topOrnament=TooltipParser.Parse(new[]{new RecognizedLine(11,new(14,9,250,9),"mixed","SSS SS SS",47)}.Concat(lines).ToArray());
+        Require(topOrnament.Name=="EXAMPLE ROBE" && topOrnament.ReviewWarnings.Count==0,"Top ornament leaked into the title or scan issues.");
+        var verified=TooltipParser.Parse(lines.Select(line=>line.Index==0 ? line with { Confidence=55,VerifiedConfidence=94 } : line).ToArray());
+        Require(verified.ReviewWarnings.Count==0 && verified.Warnings.Any(w=>w.StartsWith("Low confidence")),"Confirmed OCR text lost raw diagnostics or still requires review.");
+        var weakVerification=TooltipParser.Parse(lines.Select(line=>line.Index==0 ? line with { Confidence=55,VerifiedConfidence=58 } : line).ToArray());
+        Require(weakVerification.ReviewWarnings.Any(w=>w.StartsWith("Low confidence")),"Weak OCR confirmation suppressed a real uncertainty.");
+    }
     private static void Progress(string output)
     {
         var options=new ScanOptions(ScanMode.Auto,true,true,true,true);
@@ -122,12 +193,20 @@ internal static class ScanUiCheck
         using(var fresh=new MainForm())Require(!((CheckBox)fresh.Controls.Find("debugCaptures",true).Single()).Checked,"Diagnostic option persisted to another instance.");
         foreach(var mode in new[]{ScanMode.Auto,ScanMode.Manual})
         {
-            using var host=new Form { AutoScaleMode=AutoScaleMode.Dpi,ClientSize=new(390,460),BackColor=Color.FromArgb(35,42,52) };
-            using var view=new ScanProgressView { Location=new(12,12),Width=365 };
-            host.Controls.Add(view);_=host.Handle;
-            view.UpdateProgress(mode==ScanMode.Auto ? snapshot with { Phase=ScanPhase.Scanning,Message="",Areas=snapshot.Areas.Select(a=>a.Area==ScanTarget.Bank ? a with { Phase=AreaPhase.Scanning } : a).ToArray() }
-                : snapshot with { Mode=ScanMode.Manual,Phase=ScanPhase.Scanning,Areas=[new(ScanTarget.Equipped,AreaPhase.Scanning,3,1,0,null,false)],Message="Hold Left Alt yourself and hover a blue slot.",Issues=[] });
-            host.PerformLayout();Save(host,Path.Combine(output,$"overlay-{mode.ToString().ToLowerInvariant()}.png"));
+            using var overlay=new ScanOverlay(error=>throw error) { ClientSize=new(820,560) };
+            var overlaySnapshot=mode==ScanMode.Auto ? snapshot with { Phase=ScanPhase.Scanning,Message="",Areas=snapshot.Areas.Select(a=>a.Area==ScanTarget.Bank ? a with { Phase=AreaPhase.Scanning } : a).ToArray() }
+                : snapshot with { Mode=ScanMode.Manual,Phase=ScanPhase.Scanning,Areas=[new(ScanTarget.Equipped,AreaPhase.Scanning,3,1,0,null,false)],Message="Hold Left Alt yourself and hover a blue slot.",Issues=[] };
+            overlay.UpdateProgress(overlaySnapshot);
+            Require(overlay.Controls.Count==0,"Overlay gained independently painted child windows.");
+            Save(overlay,Path.Combine(output,$"overlay-{mode.ToString().ToLowerInvariant()}.png"));
+            nint handle=overlay.Handle;
+            for(int count=0;count<100;count++)overlay.UpdateProgress(overlaySnapshot with { Revision=20+count,
+                Areas=overlaySnapshot.Areas.Select(a=>a with { Items=count,Pending=100-count }).ToArray() });
+            Require(overlay.Handle==handle && !overlay.Visible,"Progress recreated the overlay window or activated it without a game.");
+            overlay.UpdateProgress(overlaySnapshot with { Revision=120,Phase=ScanPhase.Completed,
+                Message="Scan complete. Some items need review.",
+                Areas=overlaySnapshot.Areas.Select(a=>a with { Phase=a.Issues>0 ? AreaPhase.NeedsReview : AreaPhase.Completed,Pending=0 }).ToArray() });
+            Save(overlay,Path.Combine(output,$"overlay-{mode.ToString().ToLowerInvariant()}-completed.png"));
         }
     }
     private static void RequireFits(Control control)

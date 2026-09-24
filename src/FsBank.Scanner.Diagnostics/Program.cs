@@ -18,6 +18,9 @@ internal static class Program
                 FsBank.Scanner.Diagnostics commands:
                   --verify-export <output>
                   --verify-ui <output>
+                  --verify-review-warnings <20260923-232716-859/equipped> <output>
+                  --verify-full-review <saved-full-scan> <output>
+                  --probe-review <batch> <output>
                   --inspect-capture-layout <batch> <output>
                   --verify-capture-recovery <20260922-205823-892-all> <output>
                   --verify-character-panel <image> <output>
@@ -36,6 +39,24 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-full-review")
+        {
+            try { ReviewWarningsCheck.FullScan(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--probe-review")
+        {
+            try { ReviewProbe.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-review-warnings")
+        {
+            try { ReviewWarningsCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==2 && args[0]=="--verify-ui")

@@ -105,17 +105,16 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
     {
         using var context=new CaptureContext();
         bool first=true;
-        ScanTarget? previous=null;
         BatchScan.RunSelection(root,options,(step,folder)=>
         {
             var target=step.LocationType switch { "equipped"=>ScanTarget.Equipped,"inventory"=>ScanTarget.Inventory,_=>ScanTarget.Bank };
             RunCore(root,hoverMs,token,target==ScanTarget.Bank && step.Tab>0 ? step.Tab-1 : null,folder,context,target,
-                restoreCursor:false,allowActivate:first,countdown:first||previous!=target);
+                restoreCursor:false,allowActivate:first);
             if(target!=ScanTarget.Bank || !options.AllBankTabs || step.Tab==TabCount)progress?.CaptureComplete(target);
-            first=false;previous=target;
+            first=false;
         },log,token);
     }
-    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank,bool restoreCursor=true,bool allowActivate=true,bool countdown=false)
+    private void RunCore(string root,int hoverMs,CancellationToken token,int? targetTab,string? sessionFolder,CaptureContext context,ScanTarget target=ScanTarget.Bank,bool restoreCursor=true,bool allowActivate=true)
     {
         var preparation=Stopwatch.StartNew();
         if(target!=ScanTarget.Bank && targetTab is not null)throw new ArgumentException("Only bank scans have tabs.");
@@ -142,7 +141,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         var fullLayout=vision.FindLayout(initial,target);
         if(progress is not null)
         {
-            fullLayout=ScanPreparation.WaitForPanel(hwnd,client,target,vision,()=>Next(capture,client,token,Stopwatch.GetTimestamp()),progress,token,countdown);
+            fullLayout=ScanPreparation.WaitForPanel(hwnd,client,target,vision,()=>Next(capture,client,token,Stopwatch.GetTimestamp()),progress,token);
             context.ExpectedCursor=null;
         }
         while(progress is null && fullLayout is null && !restoreCursor && stage.ElapsedMilliseconds<TooltipClearTimeoutMs)

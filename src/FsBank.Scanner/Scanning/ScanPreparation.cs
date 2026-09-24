@@ -1,7 +1,6 @@
 using FsBank.Scanner.Game;
 using FsBank.Scanner.Imaging;
 using FsBank.Scanner.Input;
-using System.Diagnostics;
 
 namespace FsBank.Scanner.Scanning;
 
@@ -49,12 +48,8 @@ internal static class ScanPreparation
 
     // No synthetic input is held or sent here. User input is expected while opening panels.
     public static ScanLayout WaitForPanel(nint game,Rectangle client,ScanTarget target,Vision vision,
-        Func<Pixels> read,ScanProgressTracker progress,CancellationToken token,bool countdown)
+        Func<Pixels> read,ScanProgressTracker progress,CancellationToken token)
     {
-        bool waited=false;
-        ScanLayout? last=null;
-        var settled=Stopwatch.StartNew();
-        Native.GetCursorPos(out var lastCursor);
         while(true)
         {
             CheckCancellation(token);
@@ -62,7 +57,7 @@ internal static class ScanPreparation
             if(Native.GetForegroundWindow()!=game)
             {
                 progress.Waiting(target,"Switch to Fellowship to continue.");
-                waited=true;last=null;settled.Restart();Wait(token);continue;
+                Wait(token);continue;
             }
             var layout=vision.FindLayout(read(),target);
             if(layout is null)
@@ -70,18 +65,13 @@ internal static class ScanPreparation
                 progress.Waiting(target,target==ScanTarget.Bank
                     ? "Bank not detected. Open your stash to continue."
                     : "Character panel not detected. Open it to continue.");
-                waited=true;last=null;settled.Restart();Wait(token);continue;
+                Wait(token);continue;
             }
             bool held=new[]{Keys.LButton,Keys.RButton,Keys.Menu}.Any(key=>(Native.GetAsyncKeyState((int)key)&Native.KeyDownMask)!=0);
-            bool cursorKnown=Native.GetCursorPos(out var cursor);
-            if(last is null || layout.Bounds!=last.Bounds || held || !cursorKnown ||
-                Math.Abs(cursor.X-lastCursor.X)>ScanConstants.CursorTolerancePx || Math.Abs(cursor.Y-lastCursor.Y)>ScanConstants.CursorTolerancePx)
-                settled.Restart();
-            last=layout;lastCursor=cursor;
-            int delay=waited||countdown ? 2000 : 150;
-            if(!held && settled.ElapsedMilliseconds>=delay)return layout;
-            progress.Scanning(target,held ? "Release Alt and the mouse buttons to start."
-                : $"Panel detected. Starting in {Math.Max(1,(int)Math.Ceiling((delay-settled.ElapsedMilliseconds)/1000d))} s. Keep the mouse still.");
+            // Start on the first usable frame. Capture already handles mouse movement
+            // and waits for the tooltip itself; no extra countdown is needed here.
+            if(!held)return layout;
+            progress.Waiting(target,"Release Alt and the mouse buttons to start.");
             Wait(token);
         }
     }

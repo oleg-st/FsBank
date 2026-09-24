@@ -43,12 +43,14 @@ internal static class TooltipSegmenter
     // layout, not proof that a layout with more bands is correct.
     internal static bool HasReadableLayout(Pixels pixels) => Find(pixels).Count>=10;
     // Current capture profile: discard the ornamental border, not the text margin.
-    public static List<TextBand> Find(Pixels pixels, int startY=10)
+    public static List<TextBand> Find(Pixels pixels, int startY=10, bool excludeHeaderDecoration=false)
     {
         List<TextBand> result = [];
         int left = 14, right = pixels.Width - 14;
         if (right <= left || pixels.Height < 20) return result;
-        bool Ink(int x, int y) => pixels.Bright(x, y) >= 95;
+        var decoration=excludeHeaderDecoration ? HeaderDecoration(pixels,left,right) : null;
+        bool Ink(int x, int y) => pixels.Bright(x, y) >= 95
+            && (decoration is null || y>=decoration.Length/pixels.Width || !decoration[y*pixels.Width+x]);
         bool Row(int y)
         {
             int count = 0, longest = 0, run = 0;
@@ -86,5 +88,49 @@ internal static class TooltipSegmenter
             start = last = -1;
         }
         return result;
+    }
+    private static bool[] HeaderDecoration(Pixels pixels,int left,int right)
+    {
+        // Border strokes are long horizontal components. Antialiasing may split
+        // the outline into several pieces, so measure their combined coverage
+        // on the same rows. Glyph components are much less elongated.
+        int height=Math.Min(pixels.Height,85),width=pixels.Width;
+        var visited=new bool[width*height];var decoration=new bool[visited.Length];
+        var component=new List<int>();var queue=new Queue<int>();
+        var strokes=new List<(int Top,int Bottom,int[] Pixels)>();
+        for(int y=0;y<height;y++)for(int x=left;x<right;x++)
+        {
+            int index=y*width+x;
+            if(visited[index] || pixels.Bright(x,y)<95)continue;
+            component.Clear();queue.Enqueue(index);visited[index]=true;
+            int minX=x,maxX=x,minY=y,maxY=y;
+            while(queue.TryDequeue(out int point))
+            {
+                component.Add(point);int px=point%width,py=point/width;
+                minX=Math.Min(minX,px);maxX=Math.Max(maxX,px);
+                minY=Math.Min(minY,py);maxY=Math.Max(maxY,py);
+                for(int yy=Math.Max(0,py-1);yy<=Math.Min(height-1,py+1);yy++)
+                for(int xx=Math.Max(left,px-1);xx<=Math.Min(right-1,px+1);xx++)
+                {
+                    int next=yy*width+xx;
+                    if(visited[next] || pixels.Bright(xx,yy)<95)continue;
+                    visited[next]=true;queue.Enqueue(next);
+                }
+            }
+            if(maxX-minX+1>=4*(maxY-minY+1))strokes.Add((minY,maxY,component.ToArray()));
+        }
+        var ordered=strokes.OrderBy(s=>s.Top).ToArray();
+        for(int first=0;first<ordered.Length;)
+        {
+            int end=first+1,bottom=ordered[first].Bottom;
+            while(end<ordered.Length && ordered[end].Top<=bottom)
+            { bottom=Math.Max(bottom,ordered[end].Bottom);end++; }
+            var columns=new HashSet<int>();
+            for(int i=first;i<end;i++)foreach(int point in ordered[i].Pixels)columns.Add(point%width);
+            if(columns.Count>=(right-left)*.7)
+                for(int i=first;i<end;i++)foreach(int point in ordered[i].Pixels)decoration[point]=true;
+            first=end;
+        }
+        return decoration;
     }
 }

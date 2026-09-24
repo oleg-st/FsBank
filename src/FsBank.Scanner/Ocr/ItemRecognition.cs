@@ -44,7 +44,7 @@ internal static class ItemRecognition
         var cards = new StringBuilder();
         token.ThrowIfCancellationRequested();
         var pixels = Pixels.Load(file);
-        var bands = TooltipSegmenter.Find(pixels);
+        var bands = TooltipSegmenter.Find(pixels,excludeHeaderDecoration:true);
         List<RecognizedLine> lines = [];
         bool title = true;
         bool details = false;
@@ -60,13 +60,13 @@ internal static class ItemRecognition
             if(reader.PrimaryText!=read.Text)
                 repaired.Corrections.Insert(0,new("ocr_variant_agreement",0,reader.PrimaryText,read.Text,0));
             lines.Add(new(band.Index, band.Box, band.Color, repaired.Text, read.Confidence)
-                { Symbols = [..reader.Symbols], RawText = reader.PrimaryText, RecognitionText=read.Text, Corrections = repaired.Corrections });
+                { Symbols = [..reader.Symbols], RawText = reader.PrimaryText, RecognitionText=read.Text, VerifiedConfidence=reader.VerifiedConfidence, Corrections = repaired.Corrections });
         }
         var item = TooltipParser.Parse(lines);
         bool captureHeaderComplete=TooltipSegmenter.HasCompleteTitle(pixels);
-        if(!captureHeaderComplete)item.Warnings.Add("Incomplete capture header; rescan required");
+        if(!captureHeaderComplete)item.Warn("Incomplete capture header; rescan required");
         bool captureLayoutComplete=TooltipSegmenter.HasReadableLayout(pixels);
-        if(!captureLayoutComplete)item.Warnings.Add("Incomplete capture text layout; rescan required");
+        if(!captureLayoutComplete)item.Warn("Incomplete capture text layout; rescan required");
         string name = Path.GetFileNameWithoutExtension(file);
         using (var annotated = pixels.Bitmap())
         {
@@ -84,7 +84,7 @@ internal static class ItemRecognition
 
         log($"{name}: {lines.Count} lines, {item.Stats.Count} stats, {item.Modifiers.Count} modifier blocks");
         return new(file, data, cards.ToString(), lines.Count,
-            item.Warnings.Count == 0 ? null : string.Join("; ", item.Warnings.Distinct()));
+            item.ReviewWarnings.Count == 0 ? null : string.Join("; ", item.ReviewWarnings.Distinct()));
 
     }
     internal static string WriteReport(string session, IEnumerable<Result> results, double seconds, Action<string> log)

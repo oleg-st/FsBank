@@ -11,29 +11,65 @@ internal static class TooltipParser
         var result = new ParsedTooltip();
         bool stats = false, footer = false;
         int nameLineHeight = 0;
+        int nameBottom = 0;
+        bool imbuedTraits = false;
+        int remainingTraits = 0;
         ModifierBlock? block = null;
+        HashSet<int> informationalLines = [];
+        // The top ornament can be segmented before the first title line. Use
+        // the actual title's height so uppercase border noise never joins Name.
+        int headerTitleHeight=lines.TakeWhile(l=>!Regex.IsMatch(l.Text,@"\b(Back|Head|Hands|Shoulders|Chest|Legs|Feet|Waist|Wrists?|Necklace|Ring|Relic|Weapon|Off-Hand)\b.*?\b\d+\s*$")
+                && !Regex.IsMatch(l.Text,@"^\s*(Common|Uncommon|Rare|Epic|Heroic|Regal|Legendary|Power Potential)\b"))
+            .Where(l=>Regex.IsMatch(l.Text,@"^[A-Z][A-Z '\-’]+$")).Select(l=>l.Box.Height).DefaultIfEmpty(0).Max();
         foreach (var line in lines)
         {
             string text = line.Text.Replace('’', '\'').Replace('‘', '\'');
-            if (text.Contains("Left Alt") || text.Contains("Left Shift")) { footer = true; continue; }
-            if (footer) continue;
+            if (text.Contains("Left Alt") || text.Contains("Left Shift")) { footer = true; informationalLines.Add(line.Index); continue; }
+            if (footer) { informationalLines.Add(line.Index); continue; }
             // Heading detection tolerates spacing only; raw text always survives.
             if (Regex.IsMatch(text, @"ITEM\s*MODIFIER", RegexOptions.IgnoreCase))
             {
+                imbuedTraits = false;
                 block = new(line.Index); result.Modifiers.Add(block); block.Lines.Add(text);
                 var slotNumber = Regex.Match(text, @"Slot:\s*(\d+)");
                 if (slotNumber.Success && int.TryParse(slotNumber.Groups[1].Value, out int slot)) block.DisplayedSlot = slot;
                 continue;
             }
-            if (text.Contains("Gem Socket")) { result.GemSocketLabels++; block = null; continue; }
+            if (text.Contains("Gem Socket")) { result.GemSocketLabels++; block = null; imbuedTraits = false; continue; }
+            var traits = Regex.Match(text, @"\bImbued Traits\s*\((\d+)\s*/\s*(\d+)\)\s*$");
+            if (stats && traits.Success && int.TryParse(traits.Groups[1].Value,out int traitCount))
+            {
+                imbuedTraits = traitCount > 0; remainingTraits = traitCount; block = null;
+                result.MetadataLines.Add(text); informationalLines.Add(line.Index);
+                continue;
+            }
             var special = Regex.Match(text, @"\b(Set|Ability):\s*(.+)$");
             if (special.Success)
             {
+                imbuedTraits = false;
                 block = new(line.Index) { Kind = special.Groups[1].Value.ToLowerInvariant(), Name = special.Groups[2].Value };
                 result.Modifiers.Add(block);
             }
+            if (imbuedTraits)
+            {
+                // Imbued Traits are intentionally omitted from the compact export.
+                // Recognize them separately, retaining source line references for diagnostics.
+                // Limit this to the displayed count so unrelated unknown text still warns.
+                string traitName = Regex.Replace(text, @"^\s*(?:[ULI|]{1,2}\s+|[└├│─┗┣┃━]+\s*)", "").Trim();
+                if (Regex.IsMatch(traitName, @"^[A-Za-z][A-Za-z '\-]+$"))
+                {
+                    result.ImbuedTraits.Add(new(traitName,line.Index));
+                    informationalLines.Add(line.Index);
+                }
+                else result.UnparsedLines.Add(line.Index);
+                if (--remainingTraits == 0) imbuedTraits = false;
+                continue;
+            }
             if (block is not null)
             {
+                // A resolved modifier's remaining prose is retained in diagnostics,
+                // but is not used by CompactExport. Its heading/value still matters.
+                if(block.Kind != "unresolved" && !special.Success)informationalLines.Add(line.Index);
                 if (block.Kind == "unresolved")
                 {
                     var mod = Regex.Match(text, @"\b(Blessing|Trait|Imbued Essence):\s*(.+?)\s*\+(\d+)\s*$");
@@ -72,13 +108,23 @@ internal static class TooltipParser
                 { result.Slot = equipment.Groups[1].Value; result.ItemLevel = level; }
                 else if (text is "Cloth" or "Leather" or "Mail" or "Plate") result.Material = text;
                 else if (text == "Unique Equipped" || text.StartsWith("Unique Equipped:")) result.UniqueEquipped = true;
+                else if (result.Slot is null && headerTitleHeight>0 && line.Box.Height<headerTitleHeight*.75)
+                { result.MetadataLines.Add(text); informationalLines.Add(line.Index); }
+                else if (nameLineHeight > 0 && result.Slot is null && line.Box.Height < nameLineHeight * .75
+                    && line.Box.Top >= nameBottom && line.Box.Top-nameBottom < nameLineHeight)
+                {
+                    // Thin ornament directly below the title, before the slot line.
+                    // It may OCR as lowercase noise (e.g. "eee"), not only capitals.
+                    result.MetadataLines.Add(text); informationalLines.Add(line.Index);
+                }
                 else if (Regex.IsMatch(text, @"^[A-Z][A-Z '\-’]+$") && !text.Contains("ITEM"))
                 {
                     // The ornamental separator can OCR as uppercase letters,
                     // but is shorter than the title font. Keep it as evidence.
                     if (nameLineHeight > 0 && line.Box.Height < nameLineHeight * .75)
-                    { result.MetadataLines.Add(text); continue; }
+                    { result.MetadataLines.Add(text); informationalLines.Add(line.Index); continue; }
                     nameLineHeight = Math.Max(nameLineHeight, line.Box.Height);
+                    nameBottom = line.Box.Bottom;
                     // OCR can split one possessive apostrophe into curly + straight.
                     text = Regex.Replace(text, @"(?<=[A-Z])'{2,}(?=S\b)", "'");
                     // A title wrapped after a hyphen continues the same compound word.
@@ -87,22 +133,25 @@ internal static class TooltipParser
                 else result.MetadataLines.Add(text);
             }
             else if (text is "The item's potential power; derived from its" or "Item Level, Rarity, and the Modifiers it has.")
-                result.ExplanationLines.Add(line.Index);
+            { result.ExplanationLines.Add(line.Index); informationalLines.Add(line.Index); }
             else result.UnparsedLines.Add(line.Index);
         }
-        if (result.Name is null) result.Warnings.Add("Name not recognized");
-        if (!footer) result.Warnings.Add("Footer not recognized; capture may be incomplete");
-        if (result.Stats.Count == 0) result.Warnings.Add("No stats recognized");
-        if (result.Slot is null || result.ItemLevel is null || result.Rarity is null || result.PowerPotential is null) result.Warnings.Add("Incomplete item metadata");
-        if (result.Rarity is not null && result.Temperable is null) result.Warnings.Add("Tempering not recognized; inspect source line");
-        if (result.Modifiers.Any(m => m.Kind == "unresolved")) result.Warnings.Add("Unresolved modifier block");
-        if (result.UnparsedLines.Count != 0) result.Warnings.Add("Additional text retained in UnparsedLines; inspect source lines");
-        if (lines.Any(l => l.Confidence < 60 || l.Text.Length == 0)) result.Warnings.Add("Low confidence or empty text in a detected line");
+        if (result.Name is null) result.Warn("Name not recognized");
+        if (!footer) result.Warn("Footer not recognized; capture may be incomplete");
+        if (result.Stats.Count == 0) result.Warn("No stats recognized");
+        if (result.Slot is null || result.ItemLevel is null || result.Rarity is null || result.PowerPotential is null) result.Warn("Incomplete item metadata");
+        if (result.Rarity is not null && result.Temperable is null) result.Warn("Tempering not recognized; inspect source line");
+        if (result.Modifiers.Any(m => m.Kind == "unresolved")) result.Warn("Unresolved modifier block");
+        if (result.UnparsedLines.Count != 0) result.Warn("Additional text retained in UnparsedLines; inspect source lines",
+            result.UnparsedLines.Any(index=>!informationalLines.Contains(index)));
+        var uncertain=lines.Where(l => l.Confidence < 60 || l.Text.Length == 0).ToArray();
+        if (uncertain.Length>0) result.Warn("Low confidence or empty text in a detected line",
+            uncertain.Any(l=>!informationalLines.Contains(l.Index) && (l.Text.Length==0 || (l.VerifiedConfidence ?? l.Confidence)<60)));
         foreach (var line in lines.Where(l => Regex.IsMatch(l.Text, @"\([^()\[\]]*\]|\[[^()\[\]]*\)")))
-            result.Warnings.Add($"Mismatched brackets in line {line.Index}: visual review required");
+            result.Warn($"Mismatched brackets in line {line.Index}: visual review required",!informationalLines.Contains(line.Index));
         foreach(var line in lines.Where(l=>Regex.IsMatch(l.Text,@"\([A-Z]{3,}\)")))
-            result.Warnings.Add($"Parenthesized uppercase token in line {line.Index}: verify bracket shape");
-        if (result.Name is not null && (result.Name.Contains("''") || Regex.IsMatch(result.Name, "'S[A-Z]{2,}"))) result.Warnings.Add("Suspicious name spacing/punctuation");
+            result.Warn($"Parenthesized uppercase token in line {line.Index}: verify bracket shape",!informationalLines.Contains(line.Index));
+        if (result.Name is not null && (result.Name.Contains("''") || Regex.IsMatch(result.Name, "'S[A-Z]{2,}"))) result.Warn("Suspicious name spacing/punctuation");
         return result;
     }
 }

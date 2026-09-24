@@ -14,6 +14,7 @@ internal sealed class NativeTextReader : IDisposable
     private IntPtr handle;
     internal List<OcrSymbol> Symbols { get; } = [];
     internal string PrimaryText { get; private set; } = "";
+    internal int? VerifiedConfidence { get; private set; }
     static NativeTextReader()
     {
         NativeLibrary.SetDllImportResolver(typeof(NativeTextReader).Assembly, (name, assembly, search) =>
@@ -36,6 +37,20 @@ internal sealed class NativeTextReader : IDisposable
     {
         var primary=ReadVariant(pixels,box,title ? 2 : 3,title || details ? 2 : 0,7,title || details ? 60 : 0);
         PrimaryText=primary.Text;
+        VerifiedConfidence=null;
+        if(primary.Confidence<60 && primary.Text.Length>0)
+        {
+            var primarySymbols=Symbols.ToArray();
+            var confirmations=new List<int>();
+            foreach(var (scale,black) in new[]{(2,0),(3,0),(2,60),(3,60),(4,0),(4,60)})
+            {
+                var check=ReadVariant(pixels,box,scale,2,7,black);
+                if(check.Confidence>=60 && ConfidenceText(check.Text)==ConfidenceText(primary.Text))
+                    confirmations.Add(check.Confidence);
+                if(confirmations.Count==2){VerifiedConfidence=confirmations.Min();break;}
+            }
+            Symbols.Clear();Symbols.AddRange(primarySymbols);
+        }
         if(!NeedsReview(primary.Text))return primary;
         var originalSymbols=Symbols.ToArray();
         bool metadata=Regex.IsMatch(primary.Text,@"^(Common|Uncommon|Rare|Epic|Heroic|Regal|Legendary)\b");
@@ -43,9 +58,19 @@ internal sealed class NativeTextReader : IDisposable
         var second=ReadVariant(pixels,box,metadata ? 4 : 2,2,7,60);
         if(first.Text==second.Text && first.Text!=primary.Text && first.Text.Length>0
             && !NeedsReview(first.Text) && Math.Min(first.Confidence,second.Confidence)>=80)
+        {
+            VerifiedConfidence=null;
             return (second.Text,Math.Min(first.Confidence,second.Confidence));
+        }
         Symbols.Clear();Symbols.AddRange(originalSymbols);
         return primary;
+    }
+    // Ignore only the icon before a parsed Set/Ability label. The full heading
+    // and its value must agree; uncertain names/numbers cannot be voted away.
+    private static string ConfidenceText(string text)
+    {
+        var heading=Regex.Match(text,@"\b(?:Set|Ability):\s*.+$");
+        return heading.Success ? heading.Value : text;
     }
     private static bool NeedsReview(string text)
     {

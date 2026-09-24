@@ -3,7 +3,7 @@ using FsBank.Scanner.Scanning;
 
 namespace FsBank.Scanner.UI;
 
-// Shared by MainForm and the non-activating game overlay.
+// Detailed progress card for MainForm; the game overlay paints its own surface.
 internal sealed class ScanProgressView : UserControl
 {
     internal static readonly Color Ink=Color.FromArgb(34,42,53), Muted=Color.FromArgb(93,102,116);
