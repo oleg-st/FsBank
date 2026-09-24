@@ -25,6 +25,7 @@ internal static class Program
                   --inspect-capture-layout <batch> <output>
                   --verify-capture-recovery <20260922-205823-892-all> <output>
                   --verify-character-panel <image> <output>
+                  --verify-common-items <20260924-203212-836> <output>
                   --verify-tooltip-edge <crop> <output.json>
                   --verify-manual-startup <image> <output>
                   --verify-auto-preparation <saved-batch> <output>
@@ -42,6 +43,12 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-common-items")
+        {
+            try { CommonItemsCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==3 && args[0]=="--benchmark-export")

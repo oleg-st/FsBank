@@ -6,11 +6,37 @@ internal sealed record TextBand(int Index, Rectangle Box, string Color);
 
 internal static class TooltipSegmenter
 {
+    // Common titles are white, so require their long bright neutral top outline
+    // as well as title-sized text at the expected distance below it.
+    internal static bool NeutralTitleOutline(Pixels pixels,int y,int left,int right)
+    {
+        int run=0,longest=0;
+        for(int x=left;x<right;x++)
+        {
+            int i=pixels.Offset(x,y),max=Math.Max(pixels.Data[i],Math.Max(pixels.Data[i+1],pixels.Data[i+2]));
+            int min=Math.Min(pixels.Data[i],Math.Min(pixels.Data[i+1],pixels.Data[i+2]));
+            if(min>110 && max-min<35)longest=Math.Max(longest,++run);
+            else run=0;
+        }
+        return longest>(right-left)*.7;
+    }
+    internal static bool HasCompleteNeutralTitle(Pixels header,double scale=1)
+    {
+        for(int y=0;y<Math.Min(header.Height,(int)Math.Ceiling(9*scale)+1);y++)
+        {
+            if(!NeutralTitleOutline(header,y,14,header.Width-14))continue;
+            var title=Find(header,startY:y+1,excludeHeaderDecoration:true)
+                .FirstOrDefault(b=>b.Box.Height>=11*scale && b.Box.Width>=40*scale);
+            if(title is not null && title.Color=="white" && title.Box.Top-y>=9*scale && title.Box.Top-y<=28*scale)
+                return true;
+        }
+        return false;
+    }
     // Inspect only the header. A cropped title leaves body text as the first band.
-    // Title colours differ from the neutral material/equipment text below it.
     internal static bool HasCompleteTitle(Pixels pixels, double scale=1)
     {
         var header=pixels.Crop(new Rectangle(0,0,pixels.Width,Math.Min(pixels.Height,(int)Math.Ceiling(85*scale))));
+        if(HasCompleteNeutralTitle(header,scale))return true;
         // The first surviving line can be equipment metadata or the second title
         // line. Require evidence of the top outline before accepting either.
         bool topOutline=false;

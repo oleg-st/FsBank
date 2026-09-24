@@ -217,7 +217,9 @@ internal sealed class Vision
             {
                 int i=frame.Offset(x,y); int max=Math.Max(frame.Data[i],Math.Max(frame.Data[i+1],frame.Data[i+2]));
                 int min=Math.Min(frame.Data[i],Math.Min(frame.Data[i+1],frame.Data[i+2]));
-                if(max>OccupancyBrightness && max-min>OccupancyContrast) colorful++;
+                // Common items have grey outlines and may have no saturated icon pixels.
+                // Empty slot silhouettes stay below the neutral brightness threshold.
+                if(max>OccupancyBrightness && max-min>OccupancyContrast || min>OccupancyNeutralBrightness) colorful++;
                 total++;
             }
         return colorful>Math.Max(OccupancyMinimumPixels,total*OccupancyMinimumFraction); // Only clearly dark/desaturated cells are skipped.
@@ -302,6 +304,20 @@ internal sealed class Vision
                 {rect=recovered;break;}
                 // A title's glyphs can resemble a horizontal border. Keep
                 // looking upward when this candidate still clips the title.
+            }
+        }
+        if(repairHeader)
+        {
+            // Common items have a bright neutral top stroke, not coloured sides.
+            // Check even an accepted coloured crop: background equipment can
+            // otherwise leave unrelated pixels above a white title.
+            for(int y=baseY;y>=Math.Max(0,rect.Top-(int)Math.Ceiling(85*scale));y--)
+            {
+                if(!TooltipSegmenter.NeutralTitleOutline(frame,y,left+14,right-14))continue;
+                var recovered=Rectangle.FromLTRB(rect.Left,Math.Max(0,y-(int)Math.Ceiling(CropTopPaddingPx*scale)),rect.Right,rect.Bottom);
+                var header=frame.Crop(new Rectangle(recovered.X,recovered.Y,recovered.Width,Math.Min(recovered.Height,(int)Math.Ceiling(85*scale))));
+                if(!TooltipSegmenter.HasCompleteNeutralTitle(header,scale))continue;
+                rect=recovered;break;
             }
         }
         return new(rect,footerRect);

@@ -19,6 +19,7 @@ internal static class DetectionConstants
     public const int OccupancySampleStep = 2;
     public const int OccupancyBrightness = 65;
     public const int OccupancyContrast = 35;
+    public const int OccupancyNeutralBrightness = 110;
     public const int OccupancyMinimumPixels = 8;
     public const double OccupancyMinimumFraction = .035;
     public const int MinimumEdgePixels = 20;

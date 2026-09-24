@@ -38,6 +38,22 @@ internal sealed class NativeTextReader : IDisposable
         var primary=ReadVariant(pixels,box,title ? 2 : 3,title || details ? 2 : 0,7,title || details ? 60 : 0);
         PrimaryText=primary.Text;
         VerifiedConfidence=null;
+        if(primary.Text.Length==0 && !title && !details)
+        {
+            // Small, dim material labels (such as Mail) can disappear in the
+            // unpadded metadata read. Recover only on two matching confident reads.
+            var emptySymbols=Symbols.ToArray();
+            var emptyCandidates=new Dictionary<string,int>(StringComparer.Ordinal);
+            foreach(int scale in new[]{2,3,4})
+            {
+                var candidate=ReadVariant(pixels,box,scale,2,7,60);
+                if(candidate.Confidence<80 || candidate.Text.Length==0)continue;
+                if(emptyCandidates.TryGetValue(candidate.Text,out int confidence))
+                    return (candidate.Text,Math.Min(confidence,candidate.Confidence));
+                emptyCandidates.Add(candidate.Text,candidate.Confidence);
+            }
+            Symbols.Clear();Symbols.AddRange(emptySymbols);
+        }
         if(primary.Confidence<60 && primary.Text.Length>0)
         {
             var primarySymbols=Symbols.ToArray();
