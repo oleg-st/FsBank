@@ -18,6 +18,8 @@ internal static class TooltipParser
         HashSet<int> informationalLines = [];
         HashSet<int> nameLines = [];
         List<int> unrecognizedNameLines = [];
+        List<int> unrecognizedMetadataLines = [];
+        int? rarityLine = null;
         // The top ornament can be segmented before the first title line. Use
         // the actual title's height so uppercase border noise never joins Name.
         int headerTitleHeight=lines.TakeWhile(l=>!Regex.IsMatch(l.Text,@"\b(Back|Head|Hands|Shoulders|Chest|Legs|Feet|Waist|Wrists?|Necklace|Ring|Relic|Weapon|Off-Hand)\b.*?\b\d+\s*$")
@@ -33,6 +35,7 @@ internal static class TooltipParser
             {
                 imbuedTraits = false;
                 block = new(line.Index); result.Modifiers.Add(block); block.Lines.Add(text);
+                block.SourceLines.Add(line.Index);
                 var slotNumber = Regex.Match(text, @"Slot:\s*(\d+)");
                 if (slotNumber.Success && int.TryParse(slotNumber.Groups[1].Value, out int slot)) block.DisplayedSlot = slot;
                 continue;
@@ -82,7 +85,7 @@ internal static class TooltipParser
                     else if (modStat.Success && int.TryParse(modStat.Groups[1].Value, out int bonus))
                     { block.Kind = "stat"; block.Name = modStat.Groups[2].Value; block.Value = bonus; }
                 }
-                block.Lines.Add(text); continue;
+                block.Lines.Add(text); block.SourceLines.Add(line.Index); continue;
             }
             var power = Regex.Match(text, @"^Power Potential\s+(\d{1,3}(?:,\d{3})+|\d+)$");
             if (power.Success && int.TryParse(power.Groups[1].Value.Replace(",", ""), out int potential))
@@ -102,6 +105,7 @@ internal static class TooltipParser
                 if (rarity.Success)
                 {
                     result.Rarity = rarity.Groups[1].Value;
+                    rarityLine = line.Index;
                     if(text.Contains("Non Temperable"))result.Temperable=false;
                     else if(tempering.Success && int.TryParse(tempering.Groups[1].Value,out int current)
                         && int.TryParse(tempering.Groups[2].Value,out int maximum) && current<=maximum)
@@ -137,6 +141,7 @@ internal static class TooltipParser
                 else
                 {
                     result.MetadataLines.Add(text);
+                    unrecognizedMetadataLines.Add(line.Index);
                     // Unknown title text can silently truncate an otherwise valid Name.
                     if (result.Slot is null) unrecognizedNameLines.Add(line.Index);
                 }
@@ -145,30 +150,35 @@ internal static class TooltipParser
             { result.ExplanationLines.Add(line.Index); informationalLines.Add(line.Index); }
             else result.UnparsedLines.Add(line.Index);
         }
-        if (result.Name is null) result.Warn("Name not recognized");
+        if (result.Name is null) result.Warn("Name not recognized", sourceLines:unrecognizedNameLines.ToArray());
         if (!footer) result.Warn("Footer not recognized; capture may be incomplete", needsReview:false);
-        if (result.Stats.Count == 0) result.Warn("No stats recognized");
-        if (result.Slot is null) result.Warn("Item slot not recognized");
-        if (result.ItemLevel is null) result.Warn("Item level not recognized");
-        if (result.Rarity is null) result.Warn("Rarity not recognized");
+        if (result.Stats.Count == 0) result.Warn("No stats recognized", sourceLines:result.UnparsedLines.Where(i=>!informationalLines.Contains(i)).ToArray());
+        if (result.Slot is null) result.Warn("Item slot not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
+        if (result.ItemLevel is null) result.Warn("Item level not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
+        if (result.Rarity is null) result.Warn("Rarity not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
         if (result.PowerPotential is null) result.Warn("Power potential not recognized", needsReview:false);
-        if (result.Temperable is null) result.Warn("Tempering not recognized; inspect source line");
-        if (result.Stats.Any(s => s.Origin == "unresolved")) result.Warn("Stat origin not recognized");
-        if (result.Modifiers.Any(m => m.Kind == "unresolved")) result.Warn("Unresolved modifier block");
-        if (unrecognizedNameLines.Count > 0) result.Warn("Unrecognized item name text in lines " + string.Join(", ", unrecognizedNameLines));
+        if (result.Temperable is null) result.Warn("Tempering not recognized; inspect source line", sourceLines:rarityLine is { } index ? [index] : []);
+        if (result.Stats.Any(s => s.Origin == "unresolved")) result.Warn("Stat origin not recognized",
+            sourceLines:result.Stats.Where(s => s.Origin == "unresolved").Select(s => s.SourceLine).ToArray());
+        foreach (var modifier in result.Modifiers.Where(m => m.Kind == "unresolved"))
+            result.Warn("Unresolved modifier block", sourceLines:modifier.SourceLines.ToArray());
+        if (unrecognizedNameLines.Count > 0) result.Warn("Unrecognized item name text in lines " + string.Join(", ", unrecognizedNameLines),
+            sourceLines:unrecognizedNameLines.ToArray());
         if (result.UnparsedLines.Count != 0) result.Warn("Additional text retained in UnparsedLines; inspect source lines",
-            result.UnparsedLines.Any(index=>!informationalLines.Contains(index)));
+            result.UnparsedLines.Any(index=>!informationalLines.Contains(index)),
+            result.UnparsedLines.Where(index=>!informationalLines.Contains(index)).ToArray());
         var uncertain=lines.Where(l => l.Confidence < 60 || l.Text.Length == 0).ToArray();
         // Structured fields are assessed by the values we extracted, not OCR's
         // confidence in their source words. Free-form item names have no such check.
         if (uncertain.Length>0) result.Warn("Low confidence or empty text in a detected line", needsReview:false);
         foreach (var line in lines.Where(l => nameLines.Contains(l.Index) && (l.VerifiedConfidence ?? l.Confidence) < 60))
-            result.Warn($"Low confidence in item name in line {line.Index}");
+            result.Warn($"Low confidence in item name in line {line.Index}", sourceLines:[line.Index]);
         foreach (var line in lines.Where(l => Regex.IsMatch(l.Text, @"\([^()\[\]]*\]|\[[^()\[\]]*\)")))
-            result.Warn($"Mismatched brackets in line {line.Index}: visual review required",nameLines.Contains(line.Index));
+            result.Warn($"Mismatched brackets in line {line.Index}: visual review required",nameLines.Contains(line.Index),line.Index);
         foreach(var line in lines.Where(l=>Regex.IsMatch(l.Text,@"\([A-Z]{3,}\)")))
-            result.Warn($"Parenthesized uppercase token in line {line.Index}: verify bracket shape",nameLines.Contains(line.Index));
-        if (result.Name is not null && (result.Name.Contains("''") || Regex.IsMatch(result.Name, "'S[A-Z]{2,}"))) result.Warn("Suspicious name spacing/punctuation");
+            result.Warn($"Parenthesized uppercase token in line {line.Index}: verify bracket shape",nameLines.Contains(line.Index),line.Index);
+        if (result.Name is not null && (result.Name.Contains("''") || Regex.IsMatch(result.Name, "'S[A-Z]{2,}")))
+            result.Warn("Suspicious name spacing/punctuation", sourceLines:nameLines.ToArray());
         return result;
     }
 }

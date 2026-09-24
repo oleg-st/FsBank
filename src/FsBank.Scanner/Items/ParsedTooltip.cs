@@ -10,6 +10,7 @@ internal sealed class ModifierBlock(int sourceLine)
     public int? Value { get; set; }
     public int? DisplayedSlot { get; set; }
     public List<string> Lines { get; } = [];
+    public List<int> SourceLines { get; } = [];
 }
 internal sealed class ParsedTooltip
 {
@@ -35,10 +36,20 @@ internal sealed class ParsedTooltip
     // affect item values should interrupt the scan progress with "Needs review".
     [System.Text.Json.Serialization.JsonIgnore]
     public List<string> ReviewWarnings { get; } = [];
-    internal void Warn(string message,bool needsReview=true)
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Dictionary<int, List<string>> ReviewLines { get; } = [];
+    internal void Warn(string message,bool needsReview=true, params int[] sourceLines)
     {
         Warnings.Add(message);
-        if(needsReview)ReviewWarnings.Add(message);
+        if(needsReview)
+        {
+            ReviewWarnings.Add(message);
+            foreach(int index in sourceLines.Distinct())
+            {
+                if(!ReviewLines.TryGetValue(index,out var reasons))ReviewLines[index]=reasons=[];
+                reasons.Add(message);
+            }
+        }
     }
     public int GemSocketLabels { get; set; }
 }

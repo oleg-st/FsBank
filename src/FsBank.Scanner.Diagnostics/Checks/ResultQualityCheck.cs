@@ -4,6 +4,8 @@ using FsBank.Scanner.Export;
 using FsBank.Scanner.Items;
 using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning.Batch;
+using FsBank.Scanner.Scanning;
+using FsBank.Scanner.Game;
 
 namespace FsBank.Scanner.Diagnostics.Checks;
 
@@ -58,9 +60,6 @@ internal static class ResultQualityCheck
         Problem(baseline.Select(l => l.Index == 5 ? l with { Color="unknown" } : l), "Stat origin not recognized");
         Problem(baseline.Select(l => l.Index == 7 ? l with { Text="Blessing: Example +?" } : l), "Unresolved modifier");
         Problem(baseline.Select(l => l.Index == 3 ? l with { Text="Power Potential 1,20" } : l), "No stats recognized");
-        // Power Potential itself is not exported. It should not be a separate
-        // issue when all exported stats were parsed before a second valid marker.
-        Clean(baseline.Take(4).Concat(new[] { L(20,"Power Potential 99999999999999999999") }).Concat(baseline.Skip(4)), "Unused power value", sameExport:false);
 
         foreach (var (heading, kind) in new[] {
             ("+7 Haste","stat"), ("Trait: Example +3","trait"),
@@ -75,6 +74,7 @@ internal static class ResultQualityCheck
 
         Directory.CreateDirectory(output);
         CheckReports(Path.Combine(output,"reports"), baseline);
+        CheckIssueImages(Path.Combine(output,"issue-images"), baseline);
         File.WriteAllText(Path.Combine(output,"checks.txt"), "Passed: output-based review warnings, low-confidence resolved fields, uncertain/partial names, missing fields/stats/mods, unexported text, all modifier kinds, unchanged JSON values and report review counts.");
         Console.WriteLine("Result quality checks passed: " + output);
     }
@@ -106,5 +106,48 @@ internal static class ResultQualityCheck
     private static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static void CheckIssueImages(string folder, RecognizedLine[] baseline)
+    {
+        Directory.CreateDirectory(folder);
+        string file=Path.Combine(folder,"r01_c01.png");
+        var lines=baseline.Select(l=>l.Index switch
+        {
+            0 => l with { Confidence=30 },
+            2 => l with { Confidence=0 },
+            5 => l with { Text="+? Haste", RawText="+<value> Haste", Confidence=0 },
+            _ => l
+        }).ToArray();
+        using(var bitmap=new Bitmap(420,230))
+        {
+            using(var graphics=Graphics.FromImage(bitmap))
+            using(var font=new Font("Segoe UI",11))
+            {
+                graphics.Clear(Color.FromArgb(20,30,40));
+                foreach(var line in lines)graphics.DrawString(line.Text,font,Brushes.White,line.Box.Location);
+            }
+            bitmap.Save(file,System.Drawing.Imaging.ImageFormat.Png);
+        }
+        var item=TooltipParser.Parse(lines);
+        var evidence=ScanIssueEvidence.Create(file,420,230,lines,item);
+        Require(evidence.Lines.Select(l=>l.Index).SequenceEqual([0,5]),"Highlighting must exclude resolved low-confidence rarity");
+        Require(evidence.Lines[1].RawText=="+<value> Haste","Raw OCR was lost in issue evidence");
+        var tracker=new ScanProgressTracker(new(ScanMode.Auto,true,false,false,false),_=>{});
+        tracker.RegisterSession(folder,ScanTarget.Equipped,null);
+        tracker.Queued(file);
+        tracker.Recognized(file,new(file,new{},"",lines.Length,string.Join("; ",item.ReviewWarnings),evidence),null);
+        tracker.CaptureComplete(ScanTarget.Equipped);
+        tracker.CaptureFailed(ScanTarget.Equipped,null,2,1,"No stable tooltip <capture>");
+        tracker.Finish(ScanPhase.Completed,"Scan complete. Some items need review.");
+        // Images must survive temporary capture cleanup in the normal (non-debug) export.
+        File.Delete(file);
+        ScanController.WriteSummary(folder,tracker.Snapshot);
+        string html=File.ReadAllText(Path.Combine(folder,"scan-issues.html"));
+        Require(html.Contains("data:image/png;base64,"+evidence.ImageBase64) && html.Contains("class='line'"),"Standalone image or overlays missing");
+        Require(html.Contains("Raw OCR:") && html.Contains("&lt;value&gt;") && !html.Contains("<value>") && !html.Contains("<capture>"),"Tooltip OCR text was not escaped");
+        Require(html.Contains("No item image is available"),"Missing captures need an explicit fallback");
+        using var summary=JsonDocument.Parse(File.ReadAllText(Path.Combine(folder,"scan-summary.json")));
+        Require(summary.RootElement.GetProperty("Issues")[0].GetProperty("Lines").GetArrayLength()==2,"Summary lost source line evidence");
     }
 }

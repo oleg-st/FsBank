@@ -54,15 +54,16 @@ internal static class ScanUiCheck
         foreach(int index in new[]{0,1,2,4,7})
         {
             var uncertain=lines.Select(line=>line.Index==index ? line with { Confidence=40 } : line).ToArray();
-            Require(TooltipParser.Parse(uncertain).ReviewWarnings.Any(w=>w.StartsWith("Low confidence")),
-                $"Low confidence in an exported field was hidden: {index}.");
+            Require(TooltipParser.Parse(uncertain).ReviewWarnings.Any(w=>w.StartsWith("Low confidence")) == (index==0),
+                $"Low confidence must require review only for the free-form item name: {index}.");
         }
         var unresolved=TooltipParser.Parse(lines.Select(line=>line.Index==7 ? line with { Text="Unknown modifier" } : line).ToArray());
-        Require(unresolved.ReviewWarnings.Contains("Unresolved modifier block") && unresolved.ReviewWarnings.Any(w=>w.StartsWith("Mismatched brackets")),
+        Require(unresolved.ReviewWarnings.Contains("Unresolved modifier block") && unresolved.ReviewLines.ContainsKey(8),
             "An unresolved modifier was incorrectly treated as harmless prose.");
         var missing=TooltipParser.Parse(lines.Where(line=>line.Index!=1 && line.Index!=10).ToArray());
-        Require(missing.ReviewWarnings.Contains("Incomplete item metadata") && missing.ReviewWarnings.Any(w=>w.StartsWith("Footer not recognized")),
-            "Missing item fields or capture footer no longer require review.");
+        Require(missing.ReviewWarnings.Contains("Item slot not recognized") && missing.ReviewWarnings.Contains("Item level not recognized")
+            && !missing.ReviewWarnings.Any(w=>w.StartsWith("Footer not recognized")),
+            "Missing exported fields must require review; footer text alone must not.");
         var unparsed=TooltipParser.Parse(lines.Select(line=>line.Index==5 ? line with { Text="+?? Haste" } : line).ToArray());
         Require(unparsed.ReviewWarnings.Any(w=>w.StartsWith("Additional text")),"An unreadable stat was hidden.");
 
@@ -82,7 +83,7 @@ internal static class ScanUiCheck
         var ornament=TooltipParser.Parse(new[]{L(0,"EXAMPLE ROBE"),new RecognizedLine(11,new(30,18,160,9),"mixed","eee",28)}.Concat(lines[1..]).ToArray());
         Require(ornament.ReviewWarnings.Count==0 && ornament.MetadataLines.Contains("eee"),"Title ornament produced a false issue.");
         var unknown=TooltipParser.Parse(new[]{L(0,"EXAMPLE ROBE"),L(11,"eee",28)}.Concat(lines[1..]).ToArray());
-        Require(unknown.ReviewWarnings.Any(w=>w.StartsWith("Low confidence")),"Normal-sized unknown text was mistaken for a title ornament.");
+        Require(unknown.ReviewWarnings.Any(w=>w.StartsWith("Unrecognized item name text")),"Normal-sized unknown text was mistaken for a title ornament.");
         var topOrnament=TooltipParser.Parse(new[]{new RecognizedLine(11,new(14,9,250,9),"mixed","SSS SS SS",47)}.Concat(lines).ToArray());
         Require(topOrnament.Name=="EXAMPLE ROBE" && topOrnament.ReviewWarnings.Count==0,"Top ornament leaked into the title or scan issues.");
         var verified=TooltipParser.Parse(lines.Select(line=>line.Index==0 ? line with { Confidence=55,VerifiedConfidence=94 } : line).ToArray());

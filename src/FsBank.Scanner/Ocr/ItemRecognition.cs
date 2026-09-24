@@ -1,6 +1,7 @@
 using FsBank.Scanner.Export;
 using FsBank.Scanner.Imaging;
 using FsBank.Scanner.Items;
+using FsBank.Scanner.Scanning;
 using FsBank.Scanner.Scanning.Batch;
 
 using System.Diagnostics;
@@ -36,7 +37,7 @@ internal static class ItemRecognition
             .Select(file => RecognizeFile(file, reader, log, token)).ToArray();
         return WriteReport(session, results, timer.Elapsed.TotalSeconds, log);
     }
-    internal sealed record Result(string File, object Data, string Card, int Lines, string? Issue = null);
+    internal sealed record Result(string File, object Data, string Card, int Lines, string? Issue = null, ScanIssueEvidence? Evidence = null);
     internal static Result RecognizeFile(string file, NativeTextReader reader, Action<string> log, CancellationToken token)
     {
         string output = Path.GetDirectoryName(file)!;
@@ -77,7 +78,7 @@ internal static class ItemRecognition
         }
         var data = new { file = Path.GetFileName(file), sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))),
             status = !captureHeaderComplete || !captureLayoutComplete ? "rescan_required" : item.ReviewWarnings.Count > 0 ? "needs_visual_review" : "recognized",
-            reviewWarnings = item.ReviewWarnings, captureHeaderComplete, captureLayoutComplete, lines, item };
+            reviewWarnings = item.ReviewWarnings, reviewLines = item.ReviewLines, captureHeaderComplete, captureLayoutComplete, lines, item };
         cards.Append($"<article><h2>{name}</h2><div class='pair'><img src='{name}-lines.png' alt='Detected lines'><img src='data:image/png;base64,{Convert.ToBase64String(File.ReadAllBytes(file))}' alt='Source'></div><pre>{WebUtility.HtmlEncode(JsonSerializer.Serialize(item, JsonOptions))}</pre><table><tr><th>Line</th><th>Color</th><th>Confidence</th><th>Raw text</th></tr>");
         foreach (var line in lines) cards.Append($"<tr><td>{line.Index}</td><td>{line.Color}</td><td>{line.Confidence}</td><td>{WebUtility.HtmlEncode(line.Text)}"
             + (line.Corrections.Count > 0 ? $"<details><summary>OCR corrections: {line.Corrections.Count}</summary>Raw OCR: {WebUtility.HtmlEncode(line.RawText)}<br>{WebUtility.HtmlEncode(JsonSerializer.Serialize(line.Corrections))}</details>" : "") + "</td></tr>");
@@ -85,7 +86,8 @@ internal static class ItemRecognition
 
         log($"{name}: {lines.Count} lines, {item.Stats.Count} stats, {item.Modifiers.Count} modifier blocks");
         return new(file, data, cards.ToString(), lines.Count,
-            item.ReviewWarnings.Count == 0 ? null : string.Join("; ", item.ReviewWarnings.Distinct()));
+            item.ReviewWarnings.Count == 0 ? null : string.Join("; ", item.ReviewWarnings.Distinct()),
+            item.ReviewWarnings.Count == 0 ? null : ScanIssueEvidence.Create(file,pixels.Width,pixels.Height,lines,item));
 
     }
     internal static string WriteReport(string session, IEnumerable<Result> results, double seconds, Action<string> log)

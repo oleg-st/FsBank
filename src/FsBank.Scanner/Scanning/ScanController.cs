@@ -2,7 +2,6 @@ using FsBank.Scanner.Export;
 using FsBank.Scanner.Game;
 using FsBank.Scanner.Ocr;
 using FsBank.Scanner.Scanning.Manual;
-using System.Net;
 using System.Text.Json;
 
 namespace FsBank.Scanner.Scanning;
@@ -101,9 +100,8 @@ internal sealed class ScanController(Action<string> log)
         {
             Mode=snapshot.Mode.ToString(),Status=snapshot.Phase.ToString(),snapshot.Message,
             Areas=snapshot.Areas.Select(area=>new { Area=area.Area.ToString(),Status=area.Phase.ToString(),area.Items,area.Pending,area.Issues,area.Tab }),
-            Issues=snapshot.Issues.Select(issue=>new { Area=issue.Area.ToString(),issue.Tab,issue.Row,issue.Column,issue.Reason })
+            Issues=snapshot.Issues.Select(issue=>new { Area=issue.Area.ToString(),issue.Tab,issue.Row,issue.Column,issue.Reason, Lines=issue.Evidence?.Lines })
         },new JsonSerializerOptions { WriteIndented=true }));
-        string rows=string.Concat(snapshot.Issues.Select(issue=>$"<tr><td>{issue.Area}</td><td>{issue.Tab?.ToString() ?? "—"}</td><td>{issue.Row}:{issue.Column}</td><td>{WebUtility.HtmlEncode(issue.Reason)}</td></tr>"));
-        File.WriteAllText(Path.Combine(folder,"scan-issues.html"),"<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>FsBank scan results</title><style>body{font:16px/1.5 system-ui;max-width:1000px;margin:32px auto;padding:0 20px;color:#202a35}table{border-collapse:collapse;width:100%}td,th{padding:10px;text-align:left;border-bottom:1px solid #ddd;overflow-wrap:anywhere}a{color:#175da8}</style><h1>Scan results</h1><p>"+WebUtility.HtmlEncode(snapshot.Message)+"</p><p><a href='items.html'>View items</a></p><p>Recognized without issues: "+snapshot.Items+" · Needs review: "+snapshot.Issues.Length+". Recognized values should be reviewed before use.</p><table><thead><tr><th>Area</th><th>Bank tab</th><th>Slot</th><th>Details</th></tr></thead><tbody>"+rows+"</tbody></table></html>");
+        ScanIssuesHtml.Write(folder,snapshot);
     }
 }

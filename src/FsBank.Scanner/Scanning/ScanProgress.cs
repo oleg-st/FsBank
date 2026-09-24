@@ -15,7 +15,7 @@ internal sealed record ScanOptions(ScanMode Mode, bool Equipped, bool Inventory,
         { ScanTarget.Equipped => Equipped, ScanTarget.Inventory => Inventory, _ => Bank }).ToArray();
 }
 
-internal sealed record ScanIssue(ScanTarget Area, int? Tab, int Row, int Column, string Reason);
+internal sealed record ScanIssue(ScanTarget Area, int? Tab, int Row, int Column, string Reason, ScanIssueEvidence? Evidence = null);
 internal sealed record AreaProgress(ScanTarget Area, AreaPhase Phase, int Items, int Pending, int Issues, int? Tab, bool AllTabs);
 internal sealed record ScanSnapshot(long Revision, ScanMode Mode, ScanPhase Phase, AreaProgress[] Areas,
     ScanTarget? Current, string Message, ScanIssue[] Issues, Rectangle? GameBounds)
@@ -89,15 +89,15 @@ internal sealed class ScanProgressTracker(ScanOptions options, Action<ScanSnapsh
         {
             var cell = Regex.Match(Path.GetFileName(file), @"^r(\d+)_c(\d+)\.png$");
             AddIssue(area, source.Tab, cell.Success ? int.Parse(cell.Groups[1].Value) : 0,
-                cell.Success ? int.Parse(cell.Groups[2].Value) : 0, problem ?? "Recognition produced no result.");
+                cell.Success ? int.Parse(cell.Groups[2].Value) : 0, problem ?? "Recognition produced no result.", result?.Evidence);
         }
         FinishArea(area);
     });
     public void CaptureFailed(ScanTarget target, int? tab, int row, int column, string reason) =>
         Change(() => AddIssue(Find(target), tab, row, column, reason));
-    private void AddIssue(Area area, int? tab, int row, int column, string reason)
+    private void AddIssue(Area area, int? tab, int row, int column, string reason, ScanIssueEvidence? evidence = null)
     {
-        issues.Add(new(area.Target, tab, row, column, reason)); area.Issues++;
+        issues.Add(new(area.Target, tab, row, column, reason, evidence)); area.Issues++;
     }
     public void CaptureComplete(ScanTarget target) => Change(() =>
     {
