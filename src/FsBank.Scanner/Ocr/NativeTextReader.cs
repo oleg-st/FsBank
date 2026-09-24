@@ -54,13 +54,22 @@ internal sealed class NativeTextReader : IDisposable
         if(!NeedsReview(primary.Text))return primary;
         var originalSymbols=Symbols.ToArray();
         bool metadata=Regex.IsMatch(primary.Text,@"^(Common|Uncommon|Rare|Epic|Heroic|Regal|Legendary)\b");
-        var first=ReadVariant(pixels,box,3,2,7,metadata ? 60 : 0);
-        var second=ReadVariant(pixels,box,metadata ? 4 : 2,2,7,60);
-        if(first.Text==second.Text && first.Text!=primary.Text && first.Text.Length>0
-            && !NeedsReview(first.Text) && Math.Min(first.Confidence,second.Confidence)>=80)
+        var candidates=new Dictionary<string,int>(StringComparer.Ordinal);
+        // Metadata spans two distant columns. Background noise and scaling can
+        // spoil one read; require two exact, high-confidence reads of the full
+        // line, including its numbers, before replacing the primary result.
+        var variants=metadata ? new[]{(3,60),(4,60),(2,60)} : new[]{(3,0),(2,60)};
+        foreach(var (scale,black) in variants)
         {
-            VerifiedConfidence=null;
-            return (second.Text,Math.Min(first.Confidence,second.Confidence));
+            var candidate=ReadVariant(pixels,box,scale,2,7,black);
+            if(candidate.Confidence<80 || candidate.Text.Length==0 || candidate.Text==primary.Text
+                || NeedsReview(candidate.Text))continue;
+            if(candidates.TryGetValue(candidate.Text,out int confidence))
+            {
+                VerifiedConfidence=null;
+                return (candidate.Text,Math.Min(confidence,candidate.Confidence));
+            }
+            candidates.Add(candidate.Text,candidate.Confidence);
         }
         Symbols.Clear();Symbols.AddRange(originalSymbols);
         return primary;
