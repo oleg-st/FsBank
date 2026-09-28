@@ -74,8 +74,13 @@ internal static class TooltipSegmenter
         List<TextBand> result = [];
         int left = 14, right = pixels.Width - 14;
         if (right <= left || pixels.Height < 20) return result;
-        var decoration=excludeHeaderDecoration ? HeaderDecoration(pixels,left,right) : null;
-        bool Ink(int x, int y) => pixels.Bright(x, y) >= 95
+        if(excludeHeaderDecoration && pixels.Height>=120)
+            (left,right)=ExcludeSideOutlines(pixels,left,right);
+        if(excludeHeaderDecoration && TooltipHeaderBoundary.Find(pixels,left,right) is { } boundary)
+            startY=Math.Max(startY,boundary.TextStart);
+        var foreground=TooltipHeaderBoundary.Foreground(pixels,Math.Min(pixels.Height,85));
+        var decoration=excludeHeaderDecoration ? HeaderDecoration(pixels,left,right,foreground) : null;
+        bool Ink(int x, int y) => (y<foreground.Length/pixels.Width ? foreground[y*pixels.Width+x] : pixels.Bright(x,y)>=95)
             && (decoration is null || y>=decoration.Length/pixels.Width || !decoration[y*pixels.Width+x]);
         bool Row(int y)
         {
@@ -115,7 +120,31 @@ internal static class TooltipSegmenter
         }
         return result;
     }
-    private static bool[] HeaderDecoration(Pixels pixels,int left,int right)
+    private static (int Left,int Right) ExcludeSideOutlines(Pixels pixels,int left,int right)
+    {
+        // A captured tooltip can include a strip of the bank beside it. Its
+        // actual outline then falls inside the usual text margin and OCR reads
+        // it as '|'. Exclude only a thin stroke continuous through the body;
+        // individual glyph stems have gaps between lines and cannot qualify.
+        bool Outline(int x)
+        {
+            int count=0,total=0;
+            for(int y=40;y<pixels.Height-25;y+=2)
+            {
+                int bright=pixels.Bright(x,y);
+                if(bright>45 && bright-Math.Min(pixels.Bright(x-2,y),pixels.Bright(x+2,y))>15)count++;
+                total++;
+            }
+            return total>=25 && count>total*.9;
+        }
+        int innerLeft=left,innerRight=right;
+        for(int x=Math.Max(2,left-2);x<=Math.Min(left+12,pixels.Width/4);x++)
+            if(Outline(x))innerLeft=Math.Max(innerLeft,x+3);
+        for(int x=Math.Max(right-12,pixels.Width*3/4);x<=Math.Min(right+2,pixels.Width-3);x++)
+            if(Outline(x))innerRight=Math.Min(innerRight,x-2);
+        return (innerLeft,innerRight);
+    }
+    private static bool[] HeaderDecoration(Pixels pixels,int left,int right,bool[] foreground)
     {
         // Border strokes are long horizontal components. Antialiasing may split
         // the outline into several pieces, so measure their combined coverage
@@ -127,7 +156,7 @@ internal static class TooltipSegmenter
         for(int y=0;y<height;y++)for(int x=left;x<right;x++)
         {
             int index=y*width+x;
-            if(visited[index] || pixels.Bright(x,y)<95)continue;
+            if(visited[index] || !foreground[index])continue;
             component.Clear();queue.Enqueue(index);visited[index]=true;
             int minX=x,maxX=x,minY=y,maxY=y;
             while(queue.TryDequeue(out int point))
@@ -139,11 +168,16 @@ internal static class TooltipSegmenter
                 for(int xx=Math.Max(left,px-1);xx<=Math.Min(right-1,px+1);xx++)
                 {
                     int next=yy*width+xx;
-                    if(visited[next] || pixels.Bright(xx,yy)<95)continue;
+                    if(visited[next] || !foreground[next])continue;
                     visited[next]=true;queue.Enqueue(next);
                 }
             }
-            if(maxX-minX+1>=4*(maxY-minY+1))strokes.Add((minY,maxY,component.ToArray()));
+            // A wide component can also be a bright title background joined
+            // to letters. An outline is thin: bound its ink area per column,
+            // scaled with the tooltip width, before treating it as decoration.
+            double strokeThickness=2d*pixels.Width/FsBank.Scanner.Game.TooltipGeometry.TypicalWidthPx;
+            if(maxX-minX+1>=4*(maxY-minY+1) && component.Count<=(maxX-minX+1)*strokeThickness)
+                strokes.Add((minY,maxY,component.ToArray()));
         }
         var ordered=strokes.OrderBy(s=>s.Top).ToArray();
         for(int first=0;first<ordered.Length;)

@@ -26,6 +26,15 @@ internal static class Program
                   --verify-capture-recovery <20260922-205823-892-all> <output>
                   --verify-character-panel <image> <output>
                   --verify-common-items <20260924-203212-836> <output>
+                  --verify-background-header <20260924-204415-053> <output>
+                  --verify-background-regression <20260924-205359-198> <output>
+                  --verify-collapsed-tooltips <saved-scan> <valid-captures> <output>
+                  --verify-single-line-footer <20260925-103033-333> <output>
+                  --verify-side-outline <20260925-202438-147> <output>
+                  --verify-title-background <20260928-192543-915> <output>
+                  --verify-equipment-regions <saved-full-scan> <output>
+                  --verify-metadata-recovery <20260926-100929-858> <output>
+                  --verify-slot-icon <20260925-223814-478> <output>
                   --verify-tooltip-edge <crop> <output.json>
                   --verify-manual-startup <image> <output>
                   --verify-auto-preparation <saved-batch> <output>
@@ -43,6 +52,60 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-title-background")
+        {
+            try { TitleBackgroundCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-equipment-regions")
+        {
+            try { EquipmentRegionsCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-metadata-recovery")
+        {
+            try { MetadataRecoveryCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-slot-icon")
+        {
+            try { SlotIconCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-side-outline")
+        {
+            try { SideOutlineCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-single-line-footer")
+        {
+            try { SingleLineFooterCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==4 && args[0]=="--verify-collapsed-tooltips")
+        {
+            try { CollapsedTooltipCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-background-regression")
+        {
+            try { BackgroundHeaderCheck.Regression(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-background-header")
+        {
+            try { BackgroundHeaderCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==3 && args[0]=="--verify-common-items")

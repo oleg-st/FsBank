@@ -47,7 +47,8 @@ internal static class QualityCheck
     }
     public static void HeaderRegression(string batch,string output)
     {
-        Directory.CreateDirectory(output);var vision=new Vision();var rejected=new List<string>();int checkedCount=0,previouslyValid=0;
+        Directory.CreateDirectory(output);var vision=new Vision();var rejected=new List<string>();var trimmed=new List<string>();
+        int checkedCount=0,previouslyValid=0;using var reader=new NativeTextReader();
         foreach(var tab in Directory.GetDirectories(batch,"tab-*"))
         foreach(var file in Directory.GetFiles(tab,"r??_c??.png"))
         {
@@ -59,10 +60,31 @@ internal static class QualityCheck
             checkedCount++;var original=vision.FindTooltip(frame,1,repairHeader:false);var tip=vision.FindTooltip(frame,1);
             if(original is null || !TooltipSegmenter.HasCompleteTitle(frame.Crop(original.Bounds)))continue;
             previouslyValid++;
-            if(tip?.Bounds!=original.Bounds)rejected.Add(Path.GetRelativePath(batch,file));
+            if(tip?.Bounds==original.Bounds)continue;
+            string relative=Path.GetRelativePath(batch,file);
+            if(tip is null || tip.Bounds.Left!=original.Bounds.Left || tip.Bounds.Right!=original.Bounds.Right
+                || tip.Bounds.Bottom!=original.Bounds.Bottom || tip.Bounds.Top<original.Bounds.Top
+                || !TooltipSegmenter.HasCompleteTitle(frame.Crop(tip.Bounds)))
+            {rejected.Add(relative);continue;}
+            // Removing verified background above the frame is intentional. The
+            // complete title, all exported data, and tracking must survive it.
+            var exports=new List<System.Text.Json.Nodes.JsonNode>();
+            foreach(var (name,bounds) in new[]{("before",original.Bounds),("after",tip.Bounds)})
+            {
+                string folder=Path.Combine(output,Path.GetFileName(tab),Path.GetFileNameWithoutExtension(file),name);
+                Directory.CreateDirectory(folder);string saved=Path.Combine(folder,Path.GetFileName(file));frame.Crop(bounds).Save(saved);
+                var result=ItemRecognition.RecognizeFile(saved,reader,_=>{},CancellationToken.None);
+                if(result.Issue is not null)rejected.Add(relative+": "+name+": "+result.Issue);
+                exports.Add(CompactExport.Project(JsonSerializer.SerializeToElement(result.Data),1));
+            }
+            if(!System.Text.Json.Nodes.JsonNode.DeepEquals(exports[0],exports[1]) || vision.TrackTooltip(frame,1,tip)!=tip)
+                rejected.Add(relative+": changed data or unstable tracking");
+            else trimmed.Add(relative);
         }
-        File.WriteAllText(Path.Combine(output,"regression.json"),JsonSerializer.Serialize(new {Checked=checkedCount,PreviouslyValid=previouslyValid,Rejected=rejected,Note="Crops embedded on blank canvas; only previously valid detections must remain identical. Not a substitute for original full frames."},new JsonSerializerOptions{WriteIndented=true}));
+        File.WriteAllText(Path.Combine(output,"regression.json"),JsonSerializer.Serialize(new {Checked=checkedCount,PreviouslyValid=previouslyValid,TrimmedBackground=trimmed,Rejected=rejected,
+            Note="Crops embedded on blank canvas; changed bounds may only remove top background while preserving complete OCR data and tracking. Not a substitute for original full frames."},new JsonSerializerOptions{WriteIndented=true}));
         if(rejected.Count>0)throw new InvalidOperationException($"Header regression: {rejected.Count}/{checkedCount}");
+        Console.WriteLine($"Header regression: {previouslyValid} valid detections, {trimmed.Count} background trims, zero data changes or rejected captures.");
     }
     public static void Run(string batch)
     {

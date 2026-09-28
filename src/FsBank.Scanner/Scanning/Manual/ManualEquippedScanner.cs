@@ -35,6 +35,7 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
         }
         using var capture=new DesktopCapture(client);
         var vision=new Vision();
+        using var quality=new TooltipCaptureQuality();
         var panelSearch=new ManualPanelSearch(vision);
         double setupMs=preparation.Elapsed.TotalMilliseconds,layoutMs=0,clearMs=0;
         Pixels Read()
@@ -118,6 +119,7 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Manual ready in {readyMs:F0} ms after game focus: setup {setupMs:F0}, panel search {layoutMs:F0}, clear check {clearMs:F0} ms; baseline PNG saves in background.");
             Pixels? candidate=null;Rectangle? candidateBounds=null;int stable=0;
+            bool? readableStats=null;
             (int,int)? activeSlot=null;
             double captureTotalMs=0,searchTotalMs=0;int probes=0;
             bool waitingForPanel=false;
@@ -176,12 +178,15 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
                 if(tooltip is null)continue;
                 var crop=frame.Crop(tooltip.Bounds);
                 stable=candidateBounds==tooltip.Bounds && candidate is not null && candidate.Difference(crop,crop.Bounds,StabilityDifferenceStep)<MaximumStableDifference ? stable+1 : 0;
+                if(stable==0)readableStats=null;
                 candidate=crop;candidateBounds=tooltip.Bounds;
                 if(stable+1<StableFrameCount){Waiting("unstable","Waiting for the tooltip to stop changing.",frame);continue;}
                 // Accumulate stable frames during the short input-settle interval.
                 if(altHold.ElapsedMilliseconds<150 || hover.ElapsedMilliseconds<100)
                 {Waiting("settling","Hold still briefly...");continue;}
                 if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale)){Waiting("header","Full title not detected. Hover a little lower in this slot.",frame);continue;}
+                if(!TooltipSegmenter.HasReadableLayout(crop) || !(readableStats ??= quality.HasReadableStats(crop,layout.Scale)))
+                {Waiting("layout","Stats are unreadable or overlapping. Move off this item and hover it again while holding Left Alt.",frame);continue;}
                 Check();
                 if(!Native.GetCursorPos(out var after) || !layout.Cell(key.Item1,key.Item2).Contains(new Point(after.X-client.Left,after.Y-client.Top))
                     || Math.Abs(after.X-client.Left-cursor.X)>4 || Math.Abs(after.Y-client.Top-cursor.Y)>4

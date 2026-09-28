@@ -60,10 +60,25 @@ internal sealed class Vision
     private const double CharacterPatternMaxError=36;
     private readonly Pixels title = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets",TitleAsset));
     private readonly Pixels footer = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets",FooterAsset));
-    private readonly Dictionary<double, Pattern> titles = new(), footers = new();
+    private readonly Dictionary<double, Pattern> titles = new(), footers = new(), detailsFooters = new();
     private Pattern Title(double scale) => titles.TryGetValue(scale,out var p) ? p : titles[scale]=new(title,scale);
     private Pattern Footer(double scale) => footers.TryGetValue(scale,out var p) ? p : footers[scale]=new(
         footer.Crop(new Rectangle(0,FooterMatchTopInsetPx,footer.Width,footer.Height-FooterMatchTopInsetPx)),scale);
+    private Pattern DetailsFooter(double scale) => detailsFooters.TryGetValue(scale,out var p) ? p : detailsFooters[scale]=new(
+        footer.Crop(new Rectangle(0,0,DetailsFooterPrefixWidthPx,FooterMatchTopInsetPx)),scale);
+    private Rectangle? FindFooter(Pixels frame,double scale,Rectangle area)
+    {
+        var match=Footer(scale).Find(frame,area,FooterMaxError);
+        bool singleLine=match is null;
+        // Some items omit Compare Items. Match only "Left Alt -" so Show/Hide
+        // Details both work, retaining the same logical footer X coordinate.
+        match ??= DetailsFooter(scale).Find(frame,area,FooterMaxError);
+        if(match is null)return null;
+        var at=match.Value.Point;
+        if(!singleLine)at.Y-=(int)Math.Round(FooterMatchTopInsetPx*scale);
+        return new(at,new Size((int)Math.Round(footer.Width*scale),
+            (int)Math.Round((singleLine ? FooterMatchTopInsetPx : footer.Height)*scale)));
+    }
     private readonly Pixels equippedPower = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets","equipped-power.png"));
     private readonly Pixels equippedStats = Pixels.Load(Path.Combine(AppContext.BaseDirectory,"Assets","equipped-stats.png"));
     private readonly Dictionary<double, Pattern> powers = new(), stats = new();
@@ -226,13 +241,11 @@ internal sealed class Vision
     }
     public Tooltip? FindTooltip(Pixels frame,double scale,Rectangle? search=null,bool repairHeader=true)
     {
-        var match=Footer(scale).Find(frame, search ?? frame.Bounds, FooterMaxError);
-        if(match is null) return null;
-        var at=match.Value.Point;
-        at.Y-=(int)Math.Round(FooterMatchTopInsetPx*scale);
-        var footerRect=new Rectangle(at,new Size((int)Math.Round(footer.Width*scale),(int)Math.Round(footer.Height*scale)));
+        var detectedFooter=FindFooter(frame,scale,search ?? frame.Bounds);
+        if(detectedFooter is null)return null;
+        var footerRect=detectedFooter.Value;
         int center=footerRect.Left+footerRect.Width/2;
-        int baseY=at.Y-(int)Math.Round(FooterToBodyProbePx*scale);
+        int baseY=footerRect.Top-(int)Math.Round(FooterToBodyProbePx*scale);
         if(baseY<MinimumBodyProbeY) return null;
         // Find the two vertical panel outlines above the fixed footer.
         int left=FindEdge(frame,center-(int)(EdgeDistanceMaxPx*scale),center-(int)(EdgeDistanceMinPx*scale),baseY,scale);
@@ -320,6 +333,13 @@ internal sealed class Vision
                 rect=recovered;break;
             }
         }
+        if(repairHeader && TooltipHeaderBoundary.Find(frame.Crop(rect),14,rect.Width-14,scale) is { } boundary)
+        {
+            // Keep the outline and its normal padding, removing scenery before
+            // saving the capture. OCR uses the same boundary for legacy images.
+            int shift=boundary.Outline-(int)Math.Ceiling(CropTopPaddingPx*scale);
+            if(shift>0)rect=Rectangle.FromLTRB(rect.Left,rect.Top+shift,rect.Right,rect.Bottom);
+        }
         return new(rect,footerRect);
     }
     public Tooltip? FindTooltipNear(Pixels frame,double scale,Point hover)
@@ -334,7 +354,7 @@ internal sealed class Vision
     public bool FooterPresentNear(Pixels frame,double scale,Point hover)
     {
         foreach(var area in FooterSearchAreas(frame,scale,hover))
-            if(Footer(scale).Find(frame,area,FooterMaxError) is not null)return true;
+            if(FindFooter(frame,scale,area) is not null)return true;
         return false;
     }
     internal bool TooltipNearCursor(Pixels frame,double scale,Point cursor,Tooltip tooltip) =>
@@ -365,7 +385,7 @@ internal sealed class Vision
     public bool FooterPresent(Pixels frame,double scale,Rectangle footerArea)
     {
         footerArea.Inflate(FooterTrackingPaddingPx,FooterTrackingPaddingPx);
-        return Footer(scale).Find(frame,footerArea,FooterMaxError) is not null;
+        return FindFooter(frame,scale,footerArea) is not null;
     }
     private static int FindEdge(Pixels frame,int start,int end,int y,double scale)
     {

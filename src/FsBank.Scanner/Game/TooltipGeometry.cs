@@ -4,9 +4,11 @@ namespace FsBank.Scanner.Game;
 internal static class TooltipGeometry
 {
     public const string FooterAsset = "tooltip-footer.png";
-    // Only match the invariant "Left Shift - Compare Items" line. Keep the
-    // original full-footer coordinate system for panel geometry and tracking.
+    // Prefer "Left Shift - Compare Items"; when comparison is unavailable,
+    // fall back to the invariant "Left Alt -" prefix of the single details line.
+    // Both use the original footer X coordinate for panel geometry/tracking.
     public const int FooterMatchTopInsetPx = 16;
+    public const int DetailsFooterPrefixWidthPx = 65;
     public const int TypicalWidthPx = 276;
     public const int CursorGapPx = 27;
     public const int FooterLeftInsetPx = 62;

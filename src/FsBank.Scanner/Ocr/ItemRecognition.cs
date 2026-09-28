@@ -64,6 +64,24 @@ internal static class ItemRecognition
                 { Symbols = [..reader.Symbols], RawText = reader.PrimaryText, RecognitionText=read.Text, VerifiedConfidence=reader.VerifiedConfidence, Corrections = repaired.Corrections });
         }
         var item = TooltipParser.Parse(lines);
+        if(item.Slot is null || item.ItemLevel is null)
+        {
+            int rarity=lines.FindIndex(l=>Regex.IsMatch(l.Text,@"^\s*(Common|Uncommon|Rare|Epic|Heroic|Regal|Legendary)\b"));
+            if(rarity>0)
+            {
+                var line=lines[rarity-1];
+                if(line.Box.Left<pixels.Width*.25 && line.Box.Right>pixels.Width*.8
+                    && lines[rarity].Box.Top-line.Box.Bottom is >=0 and <20
+                    && reader.ReadEquipment(pixels,line.Box) is { } recovered)
+                {
+                    var repaired=TextGeometry.RestoreSpaces(recovered.Text,reader.Symbols,pixels,line.Box);
+                    repaired.Corrections.Insert(0,new("ocr_equipment_agreement",0,line.Text,recovered.Text,0));
+                    lines[rarity-1]=line with {Text=repaired.Text,RecognitionText=recovered.Text,Confidence=recovered.Confidence,
+                        VerifiedConfidence=null,Symbols=[..reader.Symbols],Corrections=[..line.Corrections,..repaired.Corrections]};
+                    item=TooltipParser.Parse(lines);
+                }
+            }
+        }
         bool captureHeaderComplete=TooltipSegmenter.HasCompleteTitle(pixels);
         if(!captureHeaderComplete)item.Warn("Incomplete capture header; rescan required");
         bool captureLayoutComplete=TooltipSegmenter.HasReadableLayout(pixels);

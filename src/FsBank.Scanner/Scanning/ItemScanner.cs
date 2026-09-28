@@ -25,6 +25,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         private DesktopCapture? capture;
         private Rectangle client;
         public Vision Vision { get; } = new();
+        public TooltipCaptureQuality Quality { get; } = new();
         private PanelSearch? panels;
         public PanelSearch Panels => panels ??= new(Vision);
         public Point? ExpectedCursor { get; set; }
@@ -35,7 +36,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
             if(capture is null){capture=new DesktopCapture(bounds);client=bounds;}
             return capture;
         }
-        public void Dispose() => capture?.Dispose();
+        public void Dispose() { capture?.Dispose();Quality.Dispose(); }
     }
     private sealed record CellResult(int Row,int Column,string Status,string? File,Rectangle? Tooltip,double Milliseconds,CellTiming? Timing=null);
     private sealed class CellTiming
@@ -44,6 +45,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         public double SearchMs {get;set;}
         public double ParkMs {get;set;}
         public double QueueWaitMs {get;set;}
+        public double ValidationMs {get;set;}
         public double TotalMs {get;set;}
         public int SearchCalls {get;set;}
         public int TrackCalls {get;set;}
@@ -260,7 +262,8 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         double selectionMs=0,readyMs=0,clearMs=0;
         try
         {
-            Move(layout.Park);Thread.Sleep(InitialParkMs);Check();
+            // Fresh frames and the dismissal loop below replace a fixed park delay.
+            Move(layout.Park);Check();
             var clearWatch=Stopwatch.StartNew(); Pixels baseline;
             do
             {
@@ -273,7 +276,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
             if(!vision.PanelStillOpen(baseline,layout))throw new InvalidOperationException("The scanned panel was closed.");
             activeTab=CurrentTab(baseline);
             if(activeTab<0)throw new InvalidOperationException("Failed to identify the active stash tab.");
-            if(targetTab is int requested && layout is BankLayout bank)
+            if(targetTab is int requested && activeTab!=requested && layout is BankLayout bank)
             {
                 Check();
                 if((Native.GetAsyncKeyState((int)Keys.Menu)&Native.KeyDownMask)!=0)
@@ -360,8 +363,11 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
             log($"Initially occupied: {cells.Count(c=>c.Occupied)}/{layout.SlotCount} cells.");
             log($"Build {BuildInfo.Configuration}; initial hover delay {hoverMs} ms; the following lines show frame capture/wait and tooltip search separately.");
             Check();
-            HoldAlt();
-            log("Left Alt is held: capturing detailed tooltips.");
+            if(cells.Any(cell=>cell.Occupied))
+            {
+                HoldAlt();
+                log("Left Alt is held: capturing detailed tooltips.");
+            }
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Panel ready in {readyMs:F0} ms: capture setup {captureSetupMs:F0}, first frame {initialFrameMs:F0}, panel search {panelSearchMs:F0}, tooltip clear {clearMs:F0}, selection {selectionMs:F0}, other preparation {readyMs-captureSetupMs-initialFrameMs-panelSearchMs-clearMs-selectionMs:F0} ms.");
             Tooltip? previous=null;
@@ -442,6 +448,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                         var rect=layout.Cell(cell.Row,cell.Col);var hover=new Point(rect.X+rect.Width/2,rect.Y+rect.Height/2);Move(hover);
                         var watch=Stopwatch.StartNew();
                         Pixels? candidate=null;Pixels? lastTooltipFrame=null;Tooltip? located=null;int stable=0;bool saved=false;int headerRetries=0;bool incompleteHeader=false;
+                        bool? readableStats=null;
                         // Delay the first probe to avoid polling before the tooltip can appear.
                         // A queued frame rendered AFTER the hover is valid even if it predates
                         // the end of this sleep; requiring a later timestamp wastes another frame.
@@ -468,20 +475,31 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                                 nextFullSearch=watch.ElapsedMilliseconds+FullSearchIntervalMs;
                             }
                             timing.SearchMs+=Stopwatch.GetElapsedTime(searchStart).TotalMilliseconds;
-                            if(found is null){stable=0;located=null;candidate=null;continue;}
+                            if(found is null){stable=0;located=null;candidate=null;readableStats=null;continue;}
                             var crop=frame.Crop(found.Bounds);
                             stable=located?.Bounds==found.Bounds && candidate is not null && candidate.Difference(crop,crop.Bounds,StabilityDifferenceStep)<MaximumStableDifference ? stable+1 : 0;
+                            if(stable==0)readableStats=null;
                             candidate=crop;located=found;
                             if(stable+1<StableFrameCount)continue;
                             Check();
-                            if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale) || !TooltipSegmenter.HasReadableLayout(crop))
+                            long validationStart=Stopwatch.GetTimestamp();
+                            bool readable=TooltipSegmenter.HasCompleteTitle(crop,layout.Scale) && TooltipSegmenter.HasReadableLayout(crop)
+                                && (readableStats ??= context.Quality.HasReadableStats(crop,layout.Scale));
+                            timing.ValidationMs+=Stopwatch.GetElapsedTime(validationStart).TotalMilliseconds;
+                            if(!readable)
                             {
                                 incompleteHeader=true;
+                                // Some game frames keep the same bounds and pixels while
+                                // all stat labels are stacked together. Let layout settle,
+                                // then rebuild the tooltip instead of exporting that frame.
+                                if(watch.ElapsedMilliseconds<LayoutSettleBeforeRetryMs)continue;
                                 frame.Save(Path.Combine(session,$"r{cell.Row+1:00}_c{cell.Col+1:00}-header-attempt-{headerRetries+1}.png"));
                                 if(headerRetries>=2)break;
                                 headerRetries++;
-                                log($"{cell.Row+1}:{cell.Col+1}: header cropped or text layout incomplete; retry {headerRetries}/2.");
+                                log($"{cell.Row+1}:{cell.Col+1}: header cropped or stats unreadable/overlapping; retry {headerRetries}/2.");
                                 Move(layout.Park);
+                                if(!Native.SetLeftAlt(false))throw new InvalidOperationException("Could not release Left Alt for tooltip recapture.");
+                                altPressed=false;altReleased=true;lastInput=Stopwatch.GetTimestamp();
                                 if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
                                 var clearRetry=Stopwatch.StartNew();
                                 while(true)
@@ -492,8 +510,9 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                                     if(!vision.FooterPresent(retryFrame,layout.Scale,found.Footer) && !vision.FooterPresentNear(retryFrame,layout.Scale,layout.Park))break;
                                     if(clearRetry.ElapsedMilliseconds>=TooltipClearTimeoutMs)throw new InvalidOperationException("Failed to dismiss the tooltip for recapture.");
                                 }
+                                HoldAlt();
                                 hover=new Point(rect.X+rect.Width/2,headerRetries==1 ? rect.Top+rect.Height/4 : rect.Bottom-rect.Height/4);
-                                Move(hover);previous=null;located=null;candidate=null;stable=0;watch.Restart();nextFullSearch=FirstFullSearchMs;
+                                Move(hover);previous=null;located=null;candidate=null;stable=0;readableStats=null;watch.Restart();nextFullSearch=FirstFullSearchMs;
                                 if(token.WaitHandle.WaitOne(hoverMs))token.ThrowIfCancellationRequested();
                                 continue;
                             }

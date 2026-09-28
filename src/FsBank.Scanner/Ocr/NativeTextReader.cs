@@ -90,6 +90,32 @@ internal sealed class NativeTextReader : IDisposable
         Symbols.Clear();Symbols.AddRange(originalSymbols);
         return primary;
     }
+    internal (string Text,int Confidence)? ReadEquipment(Pixels pixels,Rectangle box)
+    {
+        // Read only the text fields in the metadata row. Layout, not the OCR
+        // spelling of an icon, determines their bounds. Different scales must
+        // agree on both complete fields before replacing the original read.
+        if(EquipmentTextRegions.Find(pixels,box) is not { } regions)return null;
+        var candidates=new Dictionary<(string Slot,string Level),int>();
+        foreach(int scale in new[]{3,4,2})
+        {
+            var slot=ReadVariant(pixels,regions.Slot,scale,2,7,60);
+            var slotSymbols=Symbols.ToArray();
+            var level=ReadVariant(pixels,regions.Level,scale,2,7,60);
+            if(slot.Confidence<80 || level.Confidence<80
+                || !Regex.IsMatch(slot.Text,@"^(Back|Head|Hands|Shoulders|Chest|Legs|Feet|Waist|Wrists?|Necklace|Ring|Relic|Weapon|Off-Hand)$")
+                || !Regex.IsMatch(level.Text,@"^\d+$"))continue;
+            int confidence=Math.Min(slot.Confidence,level.Confidence);
+            var key=(slot.Text,level.Text);
+            if(candidates.TryGetValue(key,out int previous))
+            {
+                Symbols.InsertRange(0,slotSymbols);
+                return (slot.Text+" "+level.Text,Math.Min(previous,confidence));
+            }
+            candidates.Add(key,confidence);
+        }
+        return null;
+    }
     // Ignore only the icon before a parsed Set/Ability label. The full heading
     // and its value must agree; uncertain names/numbers cannot be voted away.
     private static string ConfidenceText(string text)
