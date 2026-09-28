@@ -59,7 +59,10 @@ internal static class ResultQualityCheck
         Problem(baseline.Select(l => l.Index == 5 ? l with { Text="" } : l), "UnparsedLines");
         Problem(baseline.Select(l => l.Index == 5 ? l with { Color="unknown" } : l), "Stat origin not recognized");
         Problem(baseline.Select(l => l.Index == 7 ? l with { Text="Blessing: Example +?" } : l), "Unresolved modifier");
-        Problem(baseline.Select(l => l.Index == 3 ? l with { Text="Power Potential 1,20" } : l), "No stats recognized");
+        Clean(baseline.Select(l => l.Index == 3 ? l with { Text="Power Potential 1,20" } : l), "Unreadable auxiliary power value");
+        Clean(baseline.Select(l => l.Index == 3 ? l with { Text="Power Potential 1200." } : l), "Punctuation after auxiliary power value");
+        Clean(baseline.Where(l => l.Index != 3), "Missing auxiliary power line");
+        Problem(baseline.Where(l => l.Index is not (1 or 2 or 3)), "No stats recognized");
 
         foreach (var (heading, kind) in new[] {
             ("+7 Haste","stat"), ("Trait: Example +3","trait"),

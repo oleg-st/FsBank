@@ -31,6 +31,8 @@ internal static class Program
                   --verify-collapsed-tooltips <saved-scan> <valid-captures> <output>
                   --verify-single-line-footer <20260925-103033-333> <output>
                   --verify-side-outline <20260925-202438-147> <output>
+                  --verify-tooltip-structure <20260928-204118-824> <output>
+                  --verify-wide-tooltip <20260928-203113-654> <output>
                   --verify-title-background <20260928-192543-915> <output>
                   --verify-equipment-regions <saved-full-scan> <output>
                   --verify-metadata-recovery <20260926-100929-858> <output>
@@ -52,6 +54,18 @@ internal static class Program
                   --benchmark-vision <session> <output.json>
                   --verify-screens [screens]
                 """);
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-tooltip-structure")
+        {
+            try { TooltipStructureCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-wide-tooltip")
+        {
+            try { WideTooltipCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
         if(args.Length==3 && args[0]=="--verify-title-background")

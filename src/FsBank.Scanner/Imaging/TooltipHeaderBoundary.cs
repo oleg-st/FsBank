@@ -10,7 +10,10 @@ internal static class TooltipHeaderBoundary
         // Require a broad, sharp saturated stroke followed by the dark title
         // margin. Saturation alone also matches the glow behind green titles.
         int Px(int value)=>(int)Math.Ceiling(value*scale);
-        for(int y=0;y<Math.Min(Px(40),pixels.Height-Px(12));y++)
+        // The amount of scenery above a saved tooltip is not bounded by a
+        // fixed number of pixels. Search the available image; stroke, margin
+        // and connected-background evidence still have to agree on a boundary.
+        for(int y=0;y<pixels.Height-Px(12);y++)
         {
             int colored=0;double blue=0,green=0,red=0;
             for(int x=left;x<right;x++)

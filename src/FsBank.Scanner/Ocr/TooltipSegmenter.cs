@@ -74,8 +74,12 @@ internal static class TooltipSegmenter
         List<TextBand> result = [];
         int left = 14, right = pixels.Width - 14;
         if (right <= left || pixels.Height < 20) return result;
-        if(excludeHeaderDecoration && pixels.Height>=120)
-            (left,right)=ExcludeSideOutlines(pixels,left,right);
+        if(excludeHeaderDecoration)
+        {
+            var sides=TooltipSideBounds.Find(pixels);
+            if(sides.Left is { } sideLeft)left=Math.Max(left,sideLeft+3);
+            if(sides.Right is { } sideRight)right=Math.Min(right,sideRight-2);
+        }
         if(excludeHeaderDecoration && TooltipHeaderBoundary.Find(pixels,left,right) is { } boundary)
             startY=Math.Max(startY,boundary.TextStart);
         var foreground=TooltipHeaderBoundary.Foreground(pixels,Math.Min(pixels.Height,85));
@@ -119,30 +123,6 @@ internal static class TooltipSegmenter
             start = last = -1;
         }
         return result;
-    }
-    private static (int Left,int Right) ExcludeSideOutlines(Pixels pixels,int left,int right)
-    {
-        // A captured tooltip can include a strip of the bank beside it. Its
-        // actual outline then falls inside the usual text margin and OCR reads
-        // it as '|'. Exclude only a thin stroke continuous through the body;
-        // individual glyph stems have gaps between lines and cannot qualify.
-        bool Outline(int x)
-        {
-            int count=0,total=0;
-            for(int y=40;y<pixels.Height-25;y+=2)
-            {
-                int bright=pixels.Bright(x,y);
-                if(bright>45 && bright-Math.Min(pixels.Bright(x-2,y),pixels.Bright(x+2,y))>15)count++;
-                total++;
-            }
-            return total>=25 && count>total*.9;
-        }
-        int innerLeft=left,innerRight=right;
-        for(int x=Math.Max(2,left-2);x<=Math.Min(left+12,pixels.Width/4);x++)
-            if(Outline(x))innerLeft=Math.Max(innerLeft,x+3);
-        for(int x=Math.Max(right-12,pixels.Width*3/4);x<=Math.Min(right+2,pixels.Width-3);x++)
-            if(Outline(x))innerRight=Math.Min(innerRight,x-2);
-        return (innerLeft,innerRight);
     }
     private static bool[] HeaderDecoration(Pixels pixels,int left,int right,bool[] foreground)
     {

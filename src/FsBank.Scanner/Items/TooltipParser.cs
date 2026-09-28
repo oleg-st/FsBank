@@ -91,8 +91,13 @@ internal static class TooltipParser
             if (power.Success && int.TryParse(power.Groups[1].Value.Replace(",", ""), out int potential))
             { stats = true; result.PowerPotential = potential; continue; }
             var stat = Regex.Match(text, @"^\+(\d+)\s+([A-Za-z][A-Za-z ]*)$");
-            if (stats && stat.Success && int.TryParse(stat.Groups[1].Value, out int value))
+            // Power Potential is auxiliary metadata. A failed read of its
+            // label/value must not hide clear stat rows following equipment
+            // metadata; modifier blocks have already been handled above.
+            if ((stats || result.Slot is not null && result.Rarity is not null)
+                && stat.Success && int.TryParse(stat.Groups[1].Value, out int value))
             {
+                stats = true;
                 result.Stats.Add(new(stat.Groups[2].Value.Trim(), value,
                     line.Color == "cyan" ? "dynamic" : line.Color == "white" ? "base" : "unresolved", line.Index));
                 continue;

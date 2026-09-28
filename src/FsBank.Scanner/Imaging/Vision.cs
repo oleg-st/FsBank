@@ -294,6 +294,22 @@ internal sealed class Vision
         var rect=Rectangle.FromLTRB(Math.Max(0,left-(int)Math.Ceiling(CropLeftPaddingPx*scale)),Math.Max(0,top-(int)Math.Ceiling(CropTopPaddingPx*scale)),
             Math.Min(frame.Width,right+(int)Math.Ceiling(CropRightPaddingPx*scale)),Math.Min(frame.Height,bottom));
         if(rect.Height<MinimumHeightPx*scale || !frame.Bounds.Contains(rect)) return null;
+        // The short edge probe can tie with a bank grid stroke. Validate each
+        // side across the full captured body and remove exterior scenery before
+        // checking the header or saving pixels for OCR.
+        var sides=TooltipSideBounds.Find(frame.Crop(rect));
+        int sideLeft=rect.Left,sideRight=rect.Right;
+        if(sides.Left is { } outlineLeft)
+        {
+            sideLeft=Math.Max(sideLeft,rect.Left+outlineLeft-(int)Math.Ceiling(CropLeftPaddingPx*scale));
+            left=rect.Left+outlineLeft;
+        }
+        if(sides.Right is { } outlineRight)
+        {
+            sideRight=Math.Min(sideRight,rect.Left+outlineRight+(int)Math.Ceiling(CropRightPaddingPx*scale));
+            right=rect.Left+outlineRight;
+        }
+        rect=Rectangle.FromLTRB(sideLeft,rect.Top,sideRight,rect.Bottom);
         if(repairHeader && !TooltipSegmenter.HasCompleteTitle(frame.Crop(rect),scale))
         {
             // Recover from interrupted side edges without changing already valid crops.
