@@ -34,7 +34,11 @@ internal static class TooltipHeaderBoundary
             // a dark margin. Stop above the outline so it cannot join components.
             // The connection must extend beyond the seed rows, even when the
             // external background strip is shorter than a whole title line.
-            if(y>Px(3)+Px(4) && BackgroundReachesOutline(pixels,y,left,right,Px(3),Px(4)))
+            // The paired upper corners also identify the frame when scenery
+            // has the same hue and disconnected edges. Keep the dark margin
+            // requirement; the lower title divider has no new side onsets.
+            if(TooltipSideBounds.StartsNear(pixels,y,scale)
+                || y>Px(3)+Px(4) && BackgroundReachesOutline(pixels,y,left,right,Px(3),Px(4)))
             {
                 bool margin=true;
                 for(int yy=y+Px(4);yy<=y+Px(8) && margin;yy++)

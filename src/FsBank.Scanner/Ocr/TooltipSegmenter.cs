@@ -35,7 +35,15 @@ internal static class TooltipSegmenter
     // Inspect only the header. A cropped title leaves body text as the first band.
     internal static bool HasCompleteTitle(Pixels pixels, double scale=1)
     {
-        var header=pixels.Crop(new Rectangle(0,0,pixels.Width,Math.Min(pixels.Height,(int)Math.Ceiling(85*scale))));
+        // Assess the title relative to the same frame boundary used by capture
+        // and OCR. Exterior scenery must not count as title-completeness evidence.
+        int top=0;
+        var sides=TooltipSideBounds.Find(pixels);
+        int left=sides.Left is { } sideLeft ? Math.Max(14,sideLeft+3) : 14;
+        int right=sides.Right is { } sideRight ? Math.Min(pixels.Width-14,sideRight-2) : pixels.Width-14;
+        if(TooltipHeaderBoundary.Find(pixels,left,right,scale) is { } boundary)
+            top=Math.Max(0,boundary.Outline-(int)Math.Ceiling(FsBank.Scanner.Game.TooltipGeometry.CropTopPaddingPx*scale));
+        var header=pixels.Crop(new Rectangle(0,top,pixels.Width,Math.Min(pixels.Height-top,(int)Math.Ceiling(85*scale))));
         if(HasCompleteNeutralTitle(header,scale))return true;
         // The first surviving line can be equipment metadata or the second title
         // line. Require evidence of the top outline before accepting either.
