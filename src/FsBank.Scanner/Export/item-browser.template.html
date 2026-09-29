@@ -87,7 +87,7 @@ function validateData(data){
     const normalized={...item,name:item.name?.trim()||'Unnamed item',item_slot:item.item_slot?.trim()||'Unknown',stats,mods,location:item.location||{},index};
     normalized.groupId=JSON.stringify([normalized.item_slot,item.name?.trim()?normalizeName(normalized.name):'unnamed:'+index]);
     normalized.base=sumStats(stats.filter(s=>s.origin==='base'));
-    normalized.extra=sumStats(stats.filter(s=>s.origin==='dynamic'));
+    normalized.extra=stats.filter(s=>s.origin==='dynamic');
     normalized.unresolved=stats.filter(s=>!['base','dynamic'].includes(s.origin));
     const searchableStats=stats.filter(s=>s.origin!=='base'||!UNSEARCHABLE_BASE_STATS.has(s.type.toLowerCase()));
     normalized.search=[normalized.name,normalized.item_slot,...searchableStats.map(s=>s.type),...mods.map(modText),locationText(normalized)].join(' ').toLocaleLowerCase();
@@ -132,7 +132,7 @@ function renderSlots(){
 }
 function sortHeader(label,key,className,title=label){const active=state.sort===key;return `<th class="${className}" scope="col" aria-sort="${active?(state.direction===1?'ascending':'descending'):'none'}"><button data-sort="${escapeHtml(key)}" title="${escapeHtml(title)}">${escapeHtml(label)}${active?(state.direction===1?' ↑':' ↓'):''}</button></th>`;}
 function rowHtml(item){
-  const extras=[...item.extra].map(([type,value])=>`<span class="extra-chip" title="${escapeHtml(item.stats.filter(s=>s.origin==='dynamic'&&s.type===type).map(s=>signed(s.value)+' '+s.type).join(' + '))}">${escapeHtml(signed(value)+' '+type)}</span>`).join('');
+  const extras=item.extra.map(({type,value})=>`<span class="extra-chip">${escapeHtml(signed(value)+' '+type)}</span>`).join('');
   const unknown=item.unresolved.map(stat=>`<span class="extra-chip unknown" title="Stat origin is unknown">? ${escapeHtml(signed(stat.value)+' '+stat.type)}</span>`).join('');
   const mods=item.mods.map(mod=>`<span class="mod-chip mod-${['set','ability','gem_power'].includes(mod.type)?mod.type:'generic'}">${escapeHtml(modText(mod))}</span>`).join('');
   const rarity=String(item.rarity).trim().toLowerCase();
