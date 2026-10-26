@@ -15,6 +15,11 @@ A Windows application for scanning items in **Fellowship** and exporting their d
 Download `FsBank-win-x64.zip` from GitHub Releases, extract the entire archive,
 and run `FsBank.Scanner.exe`. Requires Windows x64; no .NET installation is needed.
 
+## Game settings
+
+Set the game language to **English** and the in-game **UI scale to 100%** before
+scanning in Auto or Manual mode.
+
 ## Run from source
 
 Requires Windows and the .NET 10 SDK.
