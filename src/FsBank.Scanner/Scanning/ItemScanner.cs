@@ -44,6 +44,9 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         public double CaptureMs {get;set;}
         public double SearchMs {get;set;}
         public double ParkMs {get;set;}
+        public double ParkCaptureMs {get;set;}
+        public double AbsentSearchMs {get;set;}
+        public double? FirstTooltipMs {get;set;}
         public double QueueWaitMs {get;set;}
         public double ValidationMs {get;set;}
         public double TotalMs {get;set;}
@@ -385,6 +388,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                             if(clear.ElapsedMilliseconds>=TooltipClearTimeoutMs)break;
                         }
                         timing.ParkMs=clear.Elapsed.TotalMilliseconds;
+                        timing.ParkCaptureMs=timing.CaptureMs;
                         Check();
                         if(tooltipPresent || !bankOpen || observedTab!=activeTab || tabDifference>MaximumTabDifference)
                         {
@@ -449,8 +453,10 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                                 timing.FullSearchCalls++;found=vision.FindTooltip(frame,layout.Scale);
                                 nextFullSearch=watch.ElapsedMilliseconds+FullSearchIntervalMs;
                             }
-                            timing.SearchMs+=Stopwatch.GetElapsedTime(searchStart).TotalMilliseconds;
-                            if(found is null){stable=0;located=null;candidate=null;readableStats=null;continue;}
+                            double searchMs=Stopwatch.GetElapsedTime(searchStart).TotalMilliseconds;
+                            timing.SearchMs+=searchMs;
+                            if(found is null){timing.AbsentSearchMs+=searchMs;stable=0;located=null;candidate=null;readableStats=null;continue;}
+                            timing.FirstTooltipMs ??= watch.Elapsed.TotalMilliseconds;
                             var crop=frame.Crop(found.Bounds);
                             stable=located?.Bounds==found.Bounds && candidate is not null && candidate.Difference(crop,crop.Bounds,StabilityDifferenceStep)<MaximumStableDifference ? stable+1 : 0;
                             if(stable==0)readableStats=null;

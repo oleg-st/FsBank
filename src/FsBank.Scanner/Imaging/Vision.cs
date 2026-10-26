@@ -33,7 +33,10 @@ internal sealed class Pattern
         {
             var p = points[n]; int i = frame.Offset(x+p.X,y+p.Y);
             sum += Math.Abs(frame.Data[i]-p.B)+Math.Abs(frame.Data[i+1]-p.G)+Math.Abs(frame.Data[i+2]-p.R);
-            if (n == PatternEarlySamples-1 && sum > PatternEarlySamples*Pixels.ColorChannels*PatternEarlyMeanError) return byte.MaxValue;
+            // Absolute errors only accumulate. Once a partial sum exceeds the
+            // existing 12-sample budget, the remaining samples cannot rescue it.
+            if (points.Length >= PatternEarlySamples && n < PatternEarlySamples
+                && sum > PatternEarlySamples*Pixels.ColorChannels*PatternEarlyMeanError) return byte.MaxValue;
             if (sum > limit*points.Length*Pixels.ColorChannels) return byte.MaxValue;
         }
         return (double)sum/(points.Length*Pixels.ColorChannels);
