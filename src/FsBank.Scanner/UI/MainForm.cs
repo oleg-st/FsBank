@@ -156,7 +156,7 @@ internal sealed class MainForm : Form
         allTabs.Enabled=currentTab.Enabled=!manual && bank.Checked && !busy;
         inventoryHint.Text=manual ? "Available in Auto" : "Items in your bags";
         bankHint.Text=manual ? "Available in Auto" : "Items in your stash";
-        modeHelp.Text=manual ? "You move the mouse and hold Left Alt. Follow the overlay hints." : "FsBank moves the mouse. Missing panels wait for you to open them.";
+        modeHelp.Text=manual ? "Hover items without Left Alt. Follow the overlay hints." : "FsBank moves the mouse. Missing panels wait for you to open them.";
         start.Enabled=!busy && Options().Targets.Length>0;
         refreshing=false;
     }

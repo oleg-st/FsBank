@@ -377,8 +377,9 @@ internal sealed class Vision
         FooterSearchAreas(frame,scale,cursor).Any(area=>tooltip.Footer.Left>=area.Left && tooltip.Footer.Right<=area.Right);
     private IEnumerable<Rectangle> FooterSearchAreas(Pixels frame,double scale,Point hover)
     {
-        // Game places the tooltip beside the cursor. Only X is predicted: its
-        // height (and hence footer Y) varies by item and may be clamped to screen.
+        // Prefer below if it fits; otherwise above if the top still fits;
+        // otherwise clamp the bottom to the screen. Only X is predicted;
+        // confirm the vertical bounds from the footer and title frame itself.
         int footerWidth=Footer(scale).Width;
         int margin=(int)Math.Ceiling(NearSearchPaddingPx*scale);
         int preferred=hover.X+(int)Math.Round((CursorGapPx+FooterLeftInsetPx)*scale);

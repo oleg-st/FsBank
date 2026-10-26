@@ -20,7 +20,7 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
         nint game=progress is null ? Native.FindGame() : ScanPreparation.GetGame(ScanTarget.Equipped,false,progress,token);
         if(game==0)throw new InvalidOperationException("Game window not found.");
         void Wait() { if(token.WaitHandle.WaitOne(15))token.ThrowIfCancellationRequested(); }
-        log("Manual: switch to the game, open the character panel and move off items. Hold Left Alt yourself when hovering. Esc stops.");
+        log("Manual: switch to the game, open the character panel and move off items. Hover items without Left Alt. Esc stops.");
         while(Native.GetForegroundWindow()!=game){token.ThrowIfCancellationRequested();Wait();}
         var preparation=Stopwatch.StartNew();
         var client=Native.ClientBounds(game);
@@ -105,7 +105,7 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
         void Save() => File.WriteAllText(Path.Combine(session,"session.json"),JsonSerializer.Serialize(new
         {
             Mode="equipped_manual",LocationType="equipped",Status=status,Error=error,GameClient=client,CaptureRegion=client,Layout=layout,
-            TooltipMode="alt_details",DetailsKey="LeftAlt",InputMode="user_only",ElapsedMs=elapsed.ElapsedMilliseconds,LastWaitReason=lastReason,WaitCounts=waits,
+            TooltipMode="compact",InputMode="user_only",ElapsedMs=elapsed.ElapsedMilliseconds,LastWaitReason=lastReason,WaitCounts=waits,
             Timings=timings,Searches=new {search.FullSearches,search.LocalSearches,search.TrackSearches},
             Preparation=new {ReadyMs=readyMs,SetupMs=setupMs,LayoutMs=layoutMs,TooltipClearMs=clearMs,panelSearch.TilesSearched},
             Cells=layout.Slots().Select(s=>new {Row=s.Row+1,Column=s.Col+1,
@@ -114,7 +114,7 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
         },new JsonSerializerOptions{WriteIndented=true}));
         try
         {
-            progress?.Scanning(ScanTarget.Equipped,"Hold Left Alt yourself and hover a highlighted equipped item.");
+            progress?.Scanning(ScanTarget.Equipped,"Hover a highlighted equipped item without Left Alt.");
             Save();update(client,layout,pending.ToArray(),done.ToArray());
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Manual ready in {readyMs:F0} ms after game focus: setup {setupMs:F0}, panel search {layoutMs:F0}, clear check {clearMs:F0} ms; baseline PNG saves in background.");
@@ -123,8 +123,8 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
             (int,int)? activeSlot=null;
             double captureTotalMs=0,searchTotalMs=0;int probes=0;
             bool waitingForPanel=false;
-            var gate=new ManualTooltipGate();var hover=Stopwatch.StartNew();var altHold=Stopwatch.StartNew();bool altWasDown=false;
-            log($"Manual ready: {pending.Count} occupied slots. Move directly between items while holding Left Alt. Green means saved; move on immediately. OCR runs in the background.");
+            var gate=new ManualTooltipGate();var hover=Stopwatch.StartNew();
+            log($"Manual ready: {pending.Count} occupied slots. Move directly between items without Left Alt. Green means saved; move on immediately. OCR runs in the background.");
             while(pending.Count>0)
             {
                 Wait();Check();
@@ -158,14 +158,10 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
                     waitingForPanel=false;candidate=null;candidateBounds=null;stable=0;hover.Restart();
                     Waiting("panel_restored","Panel visible again. Continue hovering blue slots.");
                 }
-                bool altDown=(Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)!=0;
-                if(!altDown || !altWasDown)altHold.Restart();
-                altWasDown=altDown;
                 gate.Observe(slot,cursor,tooltip?.Bounds,new Size(frame.Width,frame.Height),layout.Scale);
                 string? waitReason=null;string waitMessage="";
-                if(slot is null){waitReason="hover_item";waitMessage="Hover a blue slot while holding Left Alt.";}
+                if(slot is null){waitReason="hover_item";waitMessage="Hover a blue slot without Left Alt.";}
                 else if(!pending.Contains(slot.Value)){waitReason="already_done";waitMessage="Saved! Hover another blue slot. OCR runs in background.";}
-                else if(!altDown){waitReason="hold_alt";waitMessage="Hold LEFT ALT yourself to capture the detailed tooltip.";}
                 else if(tooltip is null){waitReason="no_tooltip";waitMessage="Waiting for a detectable tooltip. Keep hovering.";}
                 else if(!gate.MatchesCursor || !vision.TooltipNearCursor(frame,layout.Scale,cursor,tooltip))
                 {waitReason="cursor_alignment";waitMessage="Waiting for the tooltip to follow the cursor.";}
@@ -182,15 +178,14 @@ internal sealed class ManualEquippedScanner(Action<string> log, ScanProgressTrac
                 candidate=crop;candidateBounds=tooltip.Bounds;
                 if(stable+1<StableFrameCount){Waiting("unstable","Waiting for the tooltip to stop changing.",frame);continue;}
                 // Accumulate stable frames during the short input-settle interval.
-                if(altHold.ElapsedMilliseconds<150 || hover.ElapsedMilliseconds<100)
+                if(hover.ElapsedMilliseconds<100)
                 {Waiting("settling","Hold still briefly...");continue;}
                 if(!TooltipSegmenter.HasCompleteTitle(crop,layout.Scale)){Waiting("header","Full title not detected. Hover a little lower in this slot.",frame);continue;}
                 if(!TooltipSegmenter.HasReadableLayout(crop) || !(readableStats ??= quality.HasReadableStats(crop,layout.Scale)))
-                {Waiting("layout","Stats are unreadable or overlapping. Move off this item and hover it again while holding Left Alt.",frame);continue;}
+                {Waiting("layout","Stats are unreadable or overlapping. Move off this item and hover it again.",frame);continue;}
                 Check();
                 if(!Native.GetCursorPos(out var after) || !layout.Cell(key.Item1,key.Item2).Contains(new Point(after.X-client.Left,after.Y-client.Top))
-                    || Math.Abs(after.X-client.Left-cursor.X)>4 || Math.Abs(after.Y-client.Top-cursor.Y)>4
-                    || (Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0){candidate=null;stable=0;continue;}
+                    || Math.Abs(after.X-client.Left-cursor.X)>4 || Math.Abs(after.Y-client.Top-cursor.Y)>4){candidate=null;stable=0;continue;}
                 string file=Path.Combine(session,$"r{key.Item1+1:00}_c{key.Item2+1:00}.png");
                 long saveStart=Stopwatch.GetTimestamp();
                 crop.Save(file);

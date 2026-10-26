@@ -92,6 +92,9 @@ internal static class CompactExport
                             ? JsonValue.Create(Regex.Replace(setName.GetValue<string>(), @"^[^\p{L}]+", ""))
                             : Value(mod, "Name");
                         if (Value(mod, "Value") is { } amount) result["value"] = amount;
+                        if (kind == "enchant" && mod.TryGetProperty("Stats", out var bonuses) && bonuses.GetArrayLength() > 0)
+                            result["stats"] = new JsonArray(bonuses.EnumerateArray().Select(stat => (JsonNode)new JsonObject
+                            { ["type"] = Value(stat, "Name"), ["value"] = Value(stat, "Value") }).ToArray());
                     }
                     mods.Add(result);
                 }

@@ -43,7 +43,7 @@ internal static class BatchScan
         Directory.CreateDirectory(folder);
         string status="running";string? error=null;
         void Save() => File.WriteAllText(Path.Combine(folder,"batch.json"),JsonSerializer.Serialize(new
-        { Status=status,Error=error,Mode=mode,TabCount=tabs.Count(tab=>tab.LocationType=="bank"),TooltipMode="alt_details",Tabs=tabs },new JsonSerializerOptions{WriteIndented=true}));
+        { Status=status,Error=error,Mode=mode,TabCount=tabs.Count(tab=>tab.LocationType=="bank"),TooltipMode="compact",Tabs=tabs },new JsonSerializerOptions{WriteIndented=true}));
         Save();
         try
         {

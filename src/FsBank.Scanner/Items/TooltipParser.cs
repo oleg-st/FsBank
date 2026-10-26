@@ -41,7 +41,16 @@ internal static class TooltipParser
                 continue;
             }
             if (text.Contains("Gem Socket")) { result.GemSocketLabels++; block = null; imbuedTraits = false; continue; }
-            var traits = Regex.Match(text, @"\bImbued Traits\s*\((\d+)\s*/\s*(\d+)\)\s*$");
+            // Compact tooltips have one named row per modifier and no slot headings.
+            // This also ends a collapsed attunement tree before its hidden entries.
+            if (Regex.IsMatch(text, @"\b(?:Glyph|Aspect|Sigil|Enchant):|\bEmbellishment\s"))
+            {
+                imbuedTraits = false;
+                if (block is null || block.Kind != "unresolved" || block.Lines.Count > 0
+                    && !(block.Lines.Count == 1 && Regex.IsMatch(block.Lines[0], @"ITEM\s*MODIFIER", RegexOptions.IgnoreCase)))
+                { block = new(line.Index); result.Modifiers.Add(block); }
+            }
+            var traits = Regex.Match(text, @"\b(?:Imbued Traits|Attunement Tree:?)\s*\((\d+)\s*/\s*(\d+)\)\s*$");
             if (stats && traits.Success && int.TryParse(traits.Groups[1].Value,out int traitCount))
             {
                 imbuedTraits = traitCount > 0; remainingTraits = traitCount; block = null;
@@ -78,12 +87,27 @@ internal static class TooltipParser
                 if(block.Kind != "unresolved" && !special.Success)informationalLines.Add(line.Index);
                 if (block.Kind == "unresolved")
                 {
+                    // In 0.5 Aspects and Sigils have no numeric rank; the other
+                    // named modifiers still require one. Embellishment has no colon.
+                    var ranked = Regex.Match(text, @"\b(Glyph|Enchant|Embellishment):?\s+(.+?)\s*\+(\d+)\s*$");
+                    var unranked = Regex.Match(text, @"\b(Aspect|Sigil):\s*(.+?)\s*$");
                     var mod = Regex.Match(text, @"\b(Blessing|Trait|Imbued Essence):\s*(.+?)\s*\+(\d+)\s*$");
                     var modStat = Regex.Match(text, @"^\+(\d+)\s+([A-Za-z][A-Za-z ]*)$");
-                    if (mod.Success && int.TryParse(mod.Groups[3].Value, out int amount))
+                    if (ranked.Success && int.TryParse(ranked.Groups[3].Value, out int rank))
+                    { block.Kind = ranked.Groups[1].Value.ToLowerInvariant(); block.Name = ranked.Groups[2].Value; block.Value = rank; }
+                    else if (unranked.Success)
+                    { block.Kind = unranked.Groups[1].Value.ToLowerInvariant(); block.Name = unranked.Groups[2].Value; }
+                    else if (mod.Success && int.TryParse(mod.Groups[3].Value, out int amount))
                     { block.Kind = mod.Groups[1].Value == "Imbued Essence" ? "gem_power" : mod.Groups[1].Value.ToLowerInvariant(); block.Name = mod.Groups[2].Value; block.Value = amount; }
                     else if (modStat.Success && int.TryParse(modStat.Groups[1].Value, out int bonus))
                     { block.Kind = "stat"; block.Name = modStat.Groups[2].Value; block.Value = bonus; }
+                }
+                else if (block.Kind == "enchant" && text.StartsWith('+'))
+                {
+                    var bonus = Regex.Match(text, @"^\+(\d+)\s+([A-Za-z][A-Za-z ]*)$");
+                    if (bonus.Success && int.TryParse(bonus.Groups[1].Value, out int amount))
+                        block.Stats.Add(new(bonus.Groups[2].Value.Trim(), amount, "enchant", line.Index));
+                    else result.Warn("Enchant stat not recognized", sourceLines: [line.Index]);
                 }
                 block.Lines.Add(text); block.SourceLines.Add(line.Index); continue;
             }
@@ -118,6 +142,7 @@ internal static class TooltipParser
                 }
                 else if (equipment.Success && int.TryParse(equipment.Groups[2].Value, out int level))
                 { result.Slot = equipment.Groups[1].Value; result.ItemLevel = level; }
+                else if (Regex.IsMatch(text, @"\bCharm\s*$")) result.Slot = "Charm";
                 else if (text is "Cloth" or "Leather" or "Mail" or "Plate") result.Material = text;
                 else if (text == "Unique Equipped" || text.StartsWith("Unique Equipped:")) result.UniqueEquipped = true;
                 else if (result.Slot is null && headerTitleHeight>0 && line.Box.Height<headerTitleHeight*.75)
@@ -157,9 +182,9 @@ internal static class TooltipParser
         }
         if (result.Name is null) result.Warn("Name not recognized", sourceLines:unrecognizedNameLines.ToArray());
         if (!footer) result.Warn("Footer not recognized; capture may be incomplete", needsReview:false);
-        if (result.Stats.Count == 0) result.Warn("No stats recognized", sourceLines:result.UnparsedLines.Where(i=>!informationalLines.Contains(i)).ToArray());
+        if (result.Stats.Count == 0 && result.Slot != "Charm") result.Warn("No stats recognized", sourceLines:result.UnparsedLines.Where(i=>!informationalLines.Contains(i)).ToArray());
         if (result.Slot is null) result.Warn("Item slot not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
-        if (result.ItemLevel is null) result.Warn("Item level not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
+        if (result.ItemLevel is null && result.Slot != "Charm") result.Warn("Item level not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
         if (result.Rarity is null) result.Warn("Rarity not recognized", sourceLines:unrecognizedMetadataLines.ToArray());
         if (result.PowerPotential is null) result.Warn("Power potential not recognized", needsReview:false);
         if (result.Temperable is null) result.Warn("Tempering not recognized; inspect source line", sourceLines:rarityLine is { } index ? [index] : []);

@@ -5,8 +5,6 @@ internal static class ScanConstants
     public const int ActivationTimeoutMs = 1800;
     public const int ActivationPollMs = 30;
     public const int ActivationSettleMs = 180;
-    public const int DetailsKeyTimeoutMs = 250;
-    public const int DetailsKeyPollMs = 10;
     public const int CursorTolerancePx = 5;
     public const int MouseIdleBeforeRetryMs = 300;
     public const int SaveQueueCapacity = 8;

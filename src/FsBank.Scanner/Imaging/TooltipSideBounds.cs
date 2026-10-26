@@ -31,15 +31,31 @@ internal static class TooltipSideBounds
         int beforeStart=Math.Max(0,outline-Px(12)),beforeEnd=outline-Px(4);
         int afterStart=outline+Px(8),afterEnd=outline+Px(32);
         if(beforeEnd-beforeStart<Px(4) || afterEnd>pixels.Height)return false;
-        var sides=Find(pixels);
+        // Exterior bank rows may occupy much of an old capture. Find the
+        // candidate's sides in its own body, then inspect their onset above it.
+        var sides=Find(pixels.Crop(new Rectangle(0,outline,pixels.Width,pixels.Height-outline)));
         if(sides.Left is not { } left || sides.Right is not { } right)return false;
         // Both vertical sides begin at the upper corners. A divider below the
         // title has these same sides continuing above it, so it cannot pass.
         bool Pair(int y)=>OutlineAt(pixels,left,y) && OutlineAt(pixels,right,y);
-        int before=0,after=0;
-        for(int y=beforeStart;y<beforeEnd;y++)if(Pair(y))before++;
-        for(int y=afterStart;y<afterEnd;y++)if(Pair(y))after++;
-        return before<=(beforeEnd-beforeStart)*.25 && after>=(afterEnd-afterStart)*.9;
+        bool Starts(Func<int,bool> pair)
+        {
+            int before=0,after=0;
+            for(int y=beforeStart;y<beforeEnd;y++)if(pair(y))before++;
+            for(int y=afterStart;y<afterEnd;y++)if(pair(y))after++;
+            return before<=(beforeEnd-beforeStart)*.25 && after>=(afterEnd-afterStart)*.9;
+        }
+        if(Starts(Pair))return true;
+        // A neutral bank-grid stroke can continue directly into the colored
+        // title border. Its color transition still identifies both top corners;
+        // the divider below a title has colored sides above it and cannot pass.
+        bool Colored(int x,int y)
+        {
+            int i=pixels.Offset(x,y),max=pixels.Bright(x,y);
+            int min=Math.Min(pixels.Data[i],Math.Min(pixels.Data[i+1],pixels.Data[i+2]));
+            return max>70 && max-min>45 && max-min>max*.5;
+        }
+        return Starts(y=>Pair(y) && Colored(left,y) && Colored(right,y));
     }
     private static bool OutlineAt(Pixels pixels,int x,int y)
     {

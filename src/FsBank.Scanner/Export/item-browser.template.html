@@ -22,24 +22,12 @@
 <script id="embedded-data" type="application/json">__ITEM_DATA__</script>
 <script>
 'use strict';
-const SLOT_ORDER = ['Head','Necklace','Shoulders','Back','Chest','Wrists','Hands','Legs','Feet','Ring','Weapon','Relic'];
+const SLOT_ORDER = ['Head','Necklace','Shoulders','Back','Chest','Wrists','Hands','Legs','Feet','Ring','Weapon','Relic','Charm'];
 const STAT_ORDER = ['Strength','Intellect','Intelligence','Agility','Dexterity','Spirit','Haste','Expertise','Critical Strike'];
 const HIDDEN_BASE_STATS = new Set(['armor','stamina']);
 const UNSEARCHABLE_BASE_STATS = new Set([...HIDDEN_BASE_STATS,'intellect','strength','agility']);
 const SHORT = {Strength:'Str',Intellect:'Int',Intelligence:'Int',Agility:'Agi',Dexterity:'Dex',Spirit:'Spirit',Haste:'Haste',Expertise:'Exp', 'Critical Strike':'Crit'};
 const LOCATION = {equipped:'Equipped',bank:'Bank',inventory:'Inventory'};
-// Name affixes from the supplied set reference; these also identify Uncommon items.
-const SET_RULES = [
-  {affix:"Redeemer's",name:'Dark Prophecy',slots:['Head','Necklace','Shoulders']},
-  {affix:"Witchslayer's",name:"Drakheim's Absolution",slots:['Chest','Necklace','Legs']},
-  {affix:"Vaultbinder's",name:"Torment of Bael'Aurum",slots:['Head','Necklace','Legs']},
-  {affix:"Wyrmguard's",name:'Draconic Might',slots:['Chest','Necklace','Shoulders']},
-  {affix:'Hungering',name:'Seal of the Heskyr',slots:['Back','Hands','Ring','Feet','Wrists']},
-  {affix:"Betrayer's",name:'Eldrin Deceit',slots:['Back','Hands','Ring','Feet','Wrists']},
-  {affix:'Baneful',name:'Sin Warding',slots:['Back','Hands','Ring','Feet','Wrists']},
-  {affix:'Fallen Order',name:'Tuzari Grace',slots:['Back','Hands','Ring','Feet','Wrists']},
-  {affix:'Withering',name:'Deaths Grasp',slots:['Back','Hands','Ring','Feet','Wrists']},
-];
 const RARITIES = ['common','uncommon','rare','epic','heroic','regal','legendary'];
 const collator = new Intl.Collator('en', {numeric:true,sensitivity:'base'});
 const $ = id => document.getElementById(id);
@@ -48,21 +36,10 @@ const state = {slot:'all', query:'', group:'all', location:'all', sort:'name', d
 let items = [], slots = [], statTypes = [];
 function orderByList(a,b,list){const ai=list.indexOf(a),bi=list.indexOf(b);return (ai<0?999:ai)-(bi<0?999:bi)||collator.compare(a,b);}
 function normalizeName(name){return name.normalize('NFKC').replace(/[’‘]/g,"'").replace(/[‐‑–—]/g,'-').replace(/\s*-\s*/g,'-').replace(/\s+/g,' ').trim().toLowerCase();}
-function matchesAffix(name,affix){
-  const text=normalizeName(name),key=normalizeName(affix);
-  return [key,key+"'s"].some(part=>text===part||text.startsWith(part+' ')||text.startsWith(part+'-')||text.endsWith(' '+part)||text.endsWith('-'+part));
-}
-function setRule(item){return SET_RULES.find(rule=>rule.slots.includes(item.item_slot)&&matchesAffix(item.name,rule.affix));}
 function cleanSetName(name){return String(name??'').replace(/^[^\p{L}]*/u,'').trim();}
 function explicitSet(item){
   const set = item.mods.find(mod => mod.type === 'set' && mod.set?.trim());
   return set ? cleanSetName(set.set) : '';
-}
-function detectSet(item,exportSets){
-  const explicit=explicitSet(item);
-  if(explicit)return explicit;
-  const rule=setRule(item);
-  return rule ? exportSets.get(rule.affix)||rule.name : '';
 }
 function sumStats(stats){const result = new Map();for(const stat of stats)result.set(stat.type,(result.get(stat.type)||0)+stat.value);return result;}
 function describe(value){return value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);}
@@ -70,9 +47,10 @@ function signed(value){return value>=0?'+'+value:String(value);}
 function modText(mod){
   if(mod.type==='stat')return `${signed(mod.stat.value)} ${mod.stat.type}`;
   if(mod.type==='set')return `Set: ${cleanSetName(mod.set)}`;
-  const label = {set:'Set',ability:'Ability',gem_power:'Gem',trait:'Trait',blessing:'Blessing'}[mod.type] || mod.type || 'Mod';
+  const label = {set:'Set',ability:'Ability',gem_power:'Gem',trait:'Trait',blessing:'Blessing',glyph:'Glyph',aspect:'Aspect',sigil:'Sigil',embellishment:'Embellishment',enchant:'Enchant'}[mod.type] || mod.type || 'Mod';
   const name = mod[mod.type] ?? mod.text ?? Object.fromEntries(Object.entries(mod).filter(([key])=>!['type','value'].includes(key)));
-  return `${label}: ${describe(name)}`;
+  const bonuses=mod.type==='enchant'&&Array.isArray(mod.stats)?mod.stats.map(s=>`${signed(s.value)} ${s.type}`).join(', '):'';
+  return `${label}: ${describe(name)}${mod.value!=null?' '+signed(mod.value):''}${bonuses?' ('+bonuses+')':''}`;
 }
 function locationText(item){const loc=item.location;return (LOCATION[loc.type]||loc.type||'Not specified')+(loc.tab!=null?` · tab ${loc.tab}`:'')+(loc.row!=null&&loc.column!=null?` · ${loc.row}:${loc.column}`:'');}
 function validateData(data){
@@ -96,20 +74,9 @@ function validateData(data){
 }
 function loadData(data){
   const next=validateData(data);
-  // Prefer names found in JSON to the reference table, including for low rarities.
-  const candidates=new Map();
-  for(const item of next){
-    const rule=setRule(item),name=explicitSet(item);
-    if(!rule||!name)continue;
-    if(!candidates.has(rule.affix))candidates.set(rule.affix,new Map());
-    const counts=candidates.get(rule.affix);counts.set(name,(counts.get(name)||0)+1);
-  }
-  const exportSets=new Map([...candidates].map(([affix,counts])=>[affix,[...counts].sort((a,b)=>b[1]-a[1]||collator.compare(a[0],b[0]))[0][0]]));
-  // Use the full export so filters cannot change a group's set or its position.
-  const groupSets=new Map();
-  for(const item of next){const name=explicitSet(item);if(name&&!groupSets.has(item.groupId))groupSets.set(item.groupId,name);}
-  for(const item of next)if(!groupSets.has(item.groupId)){const name=detectSet(item,exportSets);if(name)groupSets.set(item.groupId,name);}
-  for(const item of next){item.setName=groupSets.get(item.groupId)||'';item.search+=' '+item.setName.toLocaleLowerCase();}
+  // Since 0.5 sets belong to relics. Names of armor pieces no longer imply a set.
+  // Explicit set data from old exports is still displayed as recorded.
+  for(const item of next){item.setName=explicitSet(item);item.search+=' '+item.setName.toLocaleLowerCase();}
   items=next;
   slots=[...new Set(items.map(item=>item.item_slot))].sort((a,b)=>orderByList(a,b,SLOT_ORDER));
   statTypes=[...new Set(items.flatMap(item=>[...item.base.keys()]))].filter(type=>!HIDDEN_BASE_STATS.has(type.toLowerCase())).sort((a,b)=>orderByList(a,b,STAT_ORDER));

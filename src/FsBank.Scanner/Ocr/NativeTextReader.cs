@@ -58,9 +58,15 @@ internal sealed class NativeTextReader : IDisposable
         {
             var primarySymbols=Symbols.ToArray();
             var confirmations=new List<int>();
-            foreach(var (scale,black) in new[]{(2,0),(3,0),(2,60),(3,60),(4,0),(4,60)})
+            // Red title lettering can keep a low word score with the standard
+            // padding/contrast. Tight vertical bounds and stronger contrast
+            // provide independent confirmation without ignoring spaces or
+            // changing the primary text, glyph boxes or confidence threshold.
+            var verificationVariants=new[]{(2,2,0),(3,2,0),(2,2,60),(3,2,60),(4,2,0),(4,2,60)}
+                .Concat(title ? new[]{(2,0,60),(2,2,120),(2,0,120)} : []);
+            foreach(var (scale,padding,black) in verificationVariants)
             {
-                var check=ReadVariant(pixels,box,scale,2,7,black);
+                var check=ReadVariant(pixels,box,scale,padding,7,black);
                 if(check.Confidence>=60 && ConfidenceText(check.Text)==ConfidenceText(primary.Text))
                     confirmations.Add(check.Confidence);
                 if(confirmations.Count==2){VerifiedConfidence=confirmations.Min();break;}

@@ -72,10 +72,10 @@ internal static class TooltipSegmenter
         }
         return false;
     }
-    // Detailed item tooltips need separate heading, metadata, stat and footer
-    // lines. Fewer than ten bands is a conservative rejection of a collapsed
-    // layout, not proof that a layout with more bands is correct.
-    internal static bool HasReadableLayout(Pixels pixels) => Find(pixels).Count>=10;
+    // Compact tooltips can have just a title, slot, rarity, stat and footer.
+    // Live capture also verifies readable stat/charm content; line count alone
+    // must not reject short common items or accept overlapping text.
+    internal static bool HasReadableLayout(Pixels pixels) => Find(pixels).Count>=6;
     // Current capture profile: discard the ornamental border, not the text margin.
     public static List<TextBand> Find(Pixels pixels, int startY=10, bool excludeHeaderDecoration=false)
     {

@@ -22,7 +22,8 @@ internal static class TextProbe
                 if(!errors.Any(e=>e.GetProperty("file").GetString()==file && e.GetProperty("line").GetInt32()==index) && index!=0)continue;
                 var b=line.GetProperty("Box");var box=new Rectangle(b.GetProperty("X").GetInt32(),b.GetProperty("Y").GetInt32(),b.GetProperty("Width").GetInt32(),b.GetProperty("Height").GetInt32());
                 List<object> variants=[];
-                foreach(var v in new[]{(3,2,7,0),(3,2,7,60),(4,2,7,60),(2,2,7,60),(3,2,13,60),(3,0,7,60)})
+                foreach(var v in new[]{(3,2,7,0),(3,2,7,60),(4,2,7,60),(2,2,7,60),(3,2,13,60),(3,0,7,60),
+                    (2,0,7,60),(2,2,7,120),(2,0,7,120)})
                 {
                     var r=reader.ReadVariant(pixels,box,v.Item1,v.Item2,v.Item3,v.Item4);
                     variants.Add(new{config=$"{v.Item1}/{v.Item2}/{v.Item3}/{v.Item4}",r.Text,r.Confidence});

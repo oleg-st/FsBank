@@ -120,7 +120,7 @@ internal static class ItemRecognition
         var summary = new { items = items.Count, lines = lineCount, seconds = seconds,
             engine = "Tesseract native / title 2x, detail 3x / contrast + padding / measured gaps / DAWG dictionaries disabled",
             reviewItems = reviewCount, status = reviewCount > 0 ? "needs_visual_review" : "recognized",
-            scope = "Alt tooltip prototype. Modifier descriptions retained verbatim; not schema v2. No font atlas yet." };
+            scope = "Patch 0.5 compact and detailed tooltips. Modifier descriptions retained when visible." };
         File.WriteAllText(Path.Combine(output, "full.json"), JsonSerializer.Serialize(new { summary, items }, JsonOptions));
         CompactExport.Write(output, items.Select(item => JsonSerializer.SerializeToElement(item)));
         string report = Path.Combine(output, "report.html");

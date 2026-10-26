@@ -83,7 +83,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                         (context.ExpectedCursor is Point expected && Native.GetCursorPos(out var current) &&
                         (Math.Abs(current.X-expected.X)>CursorTolerancePx || Math.Abs(current.Y-expected.Y)>CursorTolerancePx)))
                         throw new OperationCanceledException("Focus or mouse changed between scan locations.");
-                    // Let the last park and Alt release render before detecting the next panel.
+                    // Let the last park render before detecting the next panel.
                     if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
                 }
                 var target=index==-2 ? ScanTarget.Equipped : index==-1 ? ScanTarget.Inventory : ScanTarget.Bank;
@@ -176,32 +176,11 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         var layout=fullLayout.Translate(-offset,0);
         int? CurrentTab(Pixels frame) => layout is BankLayout bank ? Vision.ActiveTab(frame,bank) : null;
         Native.GetCursorPos(out var originalCursor);
-        bool altPressed=false, altReleased=false;
         bool capturingItem=false;
         Point? expectedCursor=null;
         long lastInput=0;
-        void HoldAlt()
-        {
-            if((Native.GetAsyncKeyState((int)Keys.Menu)&Native.KeyDownMask)!=0)
-                throw new InvalidOperationException("Release Alt before starting capture.");
-            if(!Native.SetLeftAlt(true))throw new InvalidOperationException("Failed to press Left Alt via SendInput. Check the privilege levels of the app and game.");
-            altPressed=true;altReleased=false;lastInput=Stopwatch.GetTimestamp();
-            var wait=Stopwatch.StartNew();
-            while((Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0)
-            {
-                token.ThrowIfCancellationRequested();
-                if(wait.ElapsedMilliseconds>=DetailsKeyTimeoutMs)throw new InvalidOperationException("Windows did not confirm that Left Alt was pressed.");
-                Thread.Sleep(DetailsKeyPollMs);
-            }
-        }
         void RecoverMouse()
         {
-            bool restoreAlt=altPressed;
-            if(altPressed)
-            {
-                if(!Native.SetLeftAlt(false))throw new InvalidOperationException("Could not release Left Alt. Press and release it manually.");
-                altPressed=false;altReleased=true;
-            }
             progress?.Scanning(target,"Mouse moved — retrying current item. Keep the mouse still to continue.");
             log("Mouse moved. Discarding the unfinished attempt and waiting for the mouse to settle.");
             var idle=Stopwatch.StartNew();
@@ -218,13 +197,10 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                 if(token.WaitHandle.WaitOne(25))token.ThrowIfCancellationRequested();
             }
             expectedCursor=null;context.ExpectedCursor=null;
-            if(restoreAlt)HoldAlt();
             progress?.Scanning(target);
         }
         void Check()
         {
-            if(altPressed && (Native.GetAsyncKeyState((int)Keys.LMenu)&Native.KeyDownMask)==0)
-                throw new InvalidOperationException("Left Alt was released. Capture stopped to avoid mixing normal and detailed tooltips.");
             token.ThrowIfCancellationRequested();
             if(Native.GetForegroundWindow()!=hwnd || Native.ClientBounds(hwnd)!=client)
                 throw new InvalidOperationException("The game window lost focus or moved. Capture stopped.");
@@ -365,8 +341,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
             Check();
             if(cells.Any(cell=>cell.Occupied))
             {
-                HoldAlt();
-                log("Left Alt is held: capturing detailed tooltips.");
+                log("Capturing compact tooltips without Left Alt.");
             }
             readyMs=preparation.Elapsed.TotalMilliseconds;
             log($"Panel ready in {readyMs:F0} ms: capture setup {captureSetupMs:F0}, first frame {initialFrameMs:F0}, panel search {panelSearchMs:F0}, tooltip clear {clearMs:F0}, selection {selectionMs:F0}, other preparation {readyMs-captureSetupMs-initialFrameMs-panelSearchMs-clearMs-selectionMs:F0} ms.");
@@ -498,8 +473,6 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                                 headerRetries++;
                                 log($"{cell.Row+1}:{cell.Col+1}: header cropped or stats unreadable/overlapping; retry {headerRetries}/2.");
                                 Move(layout.Park);
-                                if(!Native.SetLeftAlt(false))throw new InvalidOperationException("Could not release Left Alt for tooltip recapture.");
-                                altPressed=false;altReleased=true;lastInput=Stopwatch.GetTimestamp();
                                 if(token.WaitHandle.WaitOne(InitialParkMs))token.ThrowIfCancellationRequested();
                                 var clearRetry=Stopwatch.StartNew();
                                 while(true)
@@ -510,7 +483,6 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                                     if(!vision.FooterPresent(retryFrame,layout.Scale,found.Footer) && !vision.FooterPresentNear(retryFrame,layout.Scale,layout.Park))break;
                                     if(clearRetry.ElapsedMilliseconds>=TooltipClearTimeoutMs)throw new InvalidOperationException("Failed to dismiss the tooltip for recapture.");
                                 }
-                                HoldAlt();
                                 hover=new Point(rect.X+rect.Width/2,headerRetries==1 ? rect.Top+rect.Height/4 : rect.Bottom-rect.Height/4);
                                 Move(hover);previous=null;located=null;candidate=null;stable=0;readableStats=null;watch.Restart();nextFullSearch=FirstFullSearchMs;
                                 if(token.WaitHandle.WaitOne(hoverMs))token.ThrowIfCancellationRequested();
@@ -560,17 +532,6 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
         catch(Exception e){status="failed";error=e.Message;throw;}
         finally
         {
-            // Release input before waiting for disk IO, writing metadata or restoring
-            // the cursor. This also runs on cancellation and loss of game focus.
-            if(altPressed)
-            {
-                altReleased=Native.SetLeftAlt(false);
-                if(!altReleased)
-                {
-                    status="input_release_failed";error="SendInput failed to release Left Alt. Press and release Alt manually.";
-                    log(error);
-                }
-            }
             queue.Writer.TryComplete();
             try {saver.GetAwaiter().GetResult();}
             catch(Exception e) {status="save_failed";error=e.Message;throw;}
@@ -581,7 +542,7 @@ internal sealed class ItemScanner(Action<string> log, OcrPipeline? ocr = null, S
                     LocationType=layout.LocationType,Status=status,Error=error,Build=BuildInfo.Configuration,GameClient=client,CaptureRegion=region,Layout=layout,Bank=layout as BankLayout,ElapsedMs=total.ElapsedMilliseconds,
                     CaptureFrames=capture.Frames-initialFrames,Cells=results,PanelValidationFailure=panelValidationFailure,Note="Tooltip rectangles are relative to CaptureRegion; rows and columns are 1-based; clicks only on bank tab buttons.",
                     Preparation=new {ReadyMs=readyMs,CaptureSetupMs=captureSetupMs,InitialFrameMs=initialFrameMs,PanelSearchMs=panelSearchMs,TooltipClearMs=clearMs,SelectionMs=selectionMs},
-                    TooltipMode="alt_details",DetailsKey="LeftAlt",AltPressed=altPressed,AltReleased=altReleased,InitialHoverDelayMs=hoverMs
+                    TooltipMode="compact",InitialHoverDelayMs=hoverMs
                     ,ActiveTab=activeTab+1,RequestedTab=targetTab+1
                 },new JsonSerializerOptions{WriteIndented=true}));
                 // Do not fight a user who moved the cursor or changed applications.

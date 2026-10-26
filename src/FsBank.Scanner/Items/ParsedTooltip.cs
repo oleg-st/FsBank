@@ -9,6 +9,7 @@ internal sealed class ModifierBlock(int sourceLine)
     public string? Name { get; set; }
     public int? Value { get; set; }
     public int? DisplayedSlot { get; set; }
+    public List<RecognizedStat> Stats { get; } = [];
     public List<string> Lines { get; } = [];
     public List<int> SourceLines { get; } = [];
 }

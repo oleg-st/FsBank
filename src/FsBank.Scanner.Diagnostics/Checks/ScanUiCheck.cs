@@ -196,7 +196,7 @@ internal static class ScanUiCheck
         {
             using var overlay=new ScanOverlay(error=>throw error) { ClientSize=new(820,560) };
             var overlaySnapshot=mode==ScanMode.Auto ? snapshot with { Phase=ScanPhase.Scanning,Message="",Areas=snapshot.Areas.Select(a=>a.Area==ScanTarget.Bank ? a with { Phase=AreaPhase.Scanning } : a).ToArray() }
-                : snapshot with { Mode=ScanMode.Manual,Phase=ScanPhase.Scanning,Areas=[new(ScanTarget.Equipped,AreaPhase.Scanning,3,1,0,null,false)],Message="Hold Left Alt yourself and hover a blue slot.",Issues=[] };
+                : snapshot with { Mode=ScanMode.Manual,Phase=ScanPhase.Scanning,Areas=[new(ScanTarget.Equipped,AreaPhase.Scanning,3,1,0,null,false)],Message="Hover a blue slot without Left Alt.",Issues=[] };
             overlay.UpdateProgress(overlaySnapshot);
             Require(overlay.Controls.Count==0,"Overlay gained independently painted child windows.");
             Save(overlay,Path.Combine(output,$"overlay-{mode.ToString().ToLowerInvariant()}.png"));

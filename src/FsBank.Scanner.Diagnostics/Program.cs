@@ -17,6 +17,9 @@ internal static class Program
             Console.WriteLine("""
                 FsBank.Scanner.Diagnostics commands:
                   --verify-export <output>
+                  --verify-patch05 <saved-scan> <output>
+                  --verify-patch05-capture <saved-scan> <placement-screenshots> <output>
+                  --verify-compact05 <screenshots> <saved-scan> <output>
                   --verify-result-quality <output>
                   --verify-ui <output>
                   --verify-review-warnings <20260923-232716-859/equipped> <output>
@@ -60,6 +63,24 @@ internal static class Program
         if(args.Length==3 && args[0]=="--verify-corner-header")
         {
             try { CornerHeaderCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==3 && args[0]=="--verify-patch05")
+        {
+            try { Patch05Check.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==4 && args[0]=="--verify-patch05-capture")
+        {
+            try { Patch05CaptureCheck.Run(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); }
+            catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
+            return;
+        }
+        if(args.Length==4 && args[0]=="--verify-compact05")
+        {
+            try { Patch05Check.Compact(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); }
             catch(Exception e) { Console.Error.WriteLine(e); Environment.ExitCode=1; }
             return;
         }
